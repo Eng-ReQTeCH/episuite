@@ -1,0 +1,512 @@
+[
+  {
+    "id": "u1",
+    "name": "First Spark",
+    "minutes": 15,
+    "type": "badge",
+    "icon": "✨",
+    "data": {}
+  },
+  {
+    "id": "u2",
+    "name": "Early Bird",
+    "minutes": 30,
+    "type": "badge",
+    "icon": "🐦",
+    "data": {}
+  },
+  {
+    "id": "u3",
+    "name": "Sprout",
+    "minutes": 60,
+    "type": "badge",
+    "icon": "🌱",
+    "data": {}
+  },
+  {
+    "id": "u4",
+    "name": "Deep Breath",
+    "minutes": 90,
+    "type": "badge",
+    "icon": "🫁",
+    "data": {}
+  },
+  {
+    "id": "u5",
+    "name": "Seedling",
+    "minutes": 120,
+    "type": "badge",
+    "icon": "🌿",
+    "data": {}
+  },
+  {
+    "id": "u6",
+    "name": "Green Thumb",
+    "minutes": 150,
+    "type": "color",
+    "icon": "👍",
+    "data": {
+      "color": "#22c55e"
+    }
+  },
+  {
+    "id": "u7",
+    "name": "Flow State",
+    "minutes": 180,
+    "type": "badge",
+    "icon": "🌊",
+    "data": {}
+  },
+  {
+    "id": "u8",
+    "name": "Steady Pace",
+    "minutes": 210,
+    "type": "title",
+    "icon": "🚶",
+    "data": {
+      "title": "Steady"
+    }
+  },
+  {
+    "id": "u9",
+    "name": "Sapling",
+    "minutes": 240,
+    "type": "badge",
+    "icon": "🌳",
+    "data": {}
+  },
+  {
+    "id": "u10",
+    "name": "Hourglass",
+    "minutes": 300,
+    "type": "badge",
+    "icon": "⏳",
+    "data": {}
+  },
+  {
+    "id": "u11",
+    "name": "Apprentice",
+    "minutes": 360,
+    "type": "title",
+    "icon": "🎓",
+    "data": {
+      "title": "Apprentice"
+    }
+  },
+  {
+    "id": "u12",
+    "name": "Disciplined",
+    "minutes": 420,
+    "type": "title",
+    "icon": "⛓️",
+    "data": {
+      "title": "Disciplined"
+    }
+  },
+  {
+    "id": "u13",
+    "name": "Marathoner",
+    "minutes": 480,
+    "type": "title",
+    "icon": "🏃",
+    "data": {
+      "title": "Marathoner"
+    }
+  },
+  {
+    "id": "u14",
+    "name": "Iron Will",
+    "minutes": 540,
+    "type": "badge",
+    "icon": "🛡️",
+    "data": {}
+  },
+  {
+    "id": "u15",
+    "name": "Scholar",
+    "minutes": 600,
+    "type": "title",
+    "icon": "📚",
+    "data": {
+      "title": "Scholar"
+    }
+  },
+  {
+    "id": "u16",
+    "name": "Burning Flame",
+    "minutes": 660,
+    "type": "color",
+    "icon": "🔥",
+    "data": {
+      "color": "#ef4444"
+    }
+  },
+  {
+    "id": "u17",
+    "name": "Deep Diver",
+    "minutes": 720,
+    "type": "badge",
+    "icon": "🤿",
+    "data": {}
+  },
+  {
+    "id": "u18",
+    "name": "Timekeeper",
+    "minutes": 780,
+    "type": "title",
+    "icon": "🕰️",
+    "data": {
+      "title": "Timekeeper"
+    }
+  },
+  {
+    "id": "u19",
+    "name": "Crystal Focus",
+    "minutes": 840,
+    "type": "color",
+    "icon": "💎",
+    "data": {
+      "color": "#3b82f6"
+    }
+  },
+  {
+    "id": "u20",
+    "name": "Zen Master",
+    "minutes": 900,
+    "type": "title",
+    "icon": "☯️",
+    "data": {
+      "title": "Zen Master"
+    }
+  },
+  {
+    "id": "u21",
+    "name": "Shadow Walker",
+    "minutes": 960,
+    "type": "badge",
+    "icon": "🥷",
+    "data": {}
+  },
+  {
+    "id": "u22",
+    "name": "Golden Leaf",
+    "minutes": 1020,
+    "type": "color",
+    "icon": "🍂",
+    "data": {
+      "color": "#f59e0b"
+    }
+  },
+  {
+    "id": "u23",
+    "name": "Storm Rider",
+    "minutes": 1080,
+    "type": "title",
+    "icon": "⛈️",
+    "data": {
+      "title": "Storm Rider"
+    }
+  },
+  {
+    "id": "u24",
+    "name": "Star Gazer",
+    "minutes": 1140,
+    "type": "badge",
+    "icon": "🔭",
+    "data": {}
+  },
+  {
+    "id": "u25",
+    "name": "Moon Child",
+    "minutes": 1200,
+    "type": "color",
+    "icon": "🌙",
+    "data": {
+      "color": "#a78bfa"
+    }
+  },
+  {
+    "id": "u26",
+    "name": "Sun Warrior",
+    "minutes": 1260,
+    "type": "title",
+    "icon": "☀️",
+    "data": {
+      "title": "Sun Warrior"
+    }
+  },
+  {
+    "id": "u27",
+    "name": "Ocean Soul",
+    "minutes": 1320,
+    "type": "color",
+    "icon": "🌊",
+    "data": {
+      "color": "#0ea5e9"
+    }
+  },
+  {
+    "id": "u28",
+    "name": "Mountain Peak",
+    "minutes": 1380,
+    "type": "badge",
+    "icon": "🏔️",
+    "data": {}
+  },
+  {
+    "id": "u29",
+    "name": "Eagle Eye",
+    "minutes": 1440,
+    "type": "title",
+    "icon": "🦅",
+    "data": {
+      "title": "Eagle Eye"
+    }
+  },
+  {
+    "id": "u30",
+    "name": "Phoenix",
+    "minutes": 1500,
+    "type": "color",
+    "icon": "🔥",
+    "data": {
+      "color": "#f97316"
+    }
+  },
+  {
+    "id": "u31",
+    "name": "Void Walker",
+    "minutes": 1560,
+    "type": "badge",
+    "icon": "🌑",
+    "data": {}
+  },
+  {
+    "id": "u32",
+    "name": "Light Bringer",
+    "minutes": 1620,
+    "type": "title",
+    "icon": "💡",
+    "data": {
+      "title": "Light Bringer"
+    }
+  },
+  {
+    "id": "u33",
+    "name": "Cosmic Dust",
+    "minutes": 1680,
+    "type": "color",
+    "icon": "✨",
+    "data": {
+      "color": "#ec4899"
+    }
+  },
+  {
+    "id": "u34",
+    "name": "Nebula",
+    "minutes": 1740,
+    "type": "badge",
+    "icon": "🌌",
+    "data": {}
+  },
+  {
+    "id": "u35",
+    "name": "Galaxy Brain",
+    "minutes": 1800,
+    "type": "title",
+    "icon": "🧠",
+    "data": {
+      "title": "Galaxy Brain"
+    }
+  },
+  {
+    "id": "u36",
+    "name": "Supernova",
+    "minutes": 1860,
+    "type": "color",
+    "icon": "💥",
+    "data": {
+      "color": "#eab308"
+    }
+  },
+  {
+    "id": "u37",
+    "name": "Black Hole",
+    "minutes": 1920,
+    "type": "badge",
+    "icon": "🕳️",
+    "data": {}
+  },
+  {
+    "id": "u38",
+    "name": "Time Lord",
+    "minutes": 1980,
+    "type": "title",
+    "icon": "⏱️",
+    "data": {
+      "title": "Time Lord"
+    }
+  },
+  {
+    "id": "u39",
+    "name": "Ethereal",
+    "minutes": 2040,
+    "type": "color",
+    "icon": "👻",
+    "data": {
+      "color": "#94a3b8"
+    }
+  },
+  {
+    "id": "u40",
+    "name": "Infinity",
+    "minutes": 2100,
+    "type": "badge",
+    "icon": "♾️",
+    "data": {}
+  },
+  {
+    "id": "u41",
+    "name": "Eternal",
+    "minutes": 2160,
+    "type": "title",
+    "icon": "♾️",
+    "data": {
+      "title": "Eternal"
+    }
+  },
+  {
+    "id": "u42",
+    "name": "Radiant",
+    "minutes": 2220,
+    "type": "color",
+    "icon": "☀️",
+    "data": {
+      "color": "#fbbf24"
+    }
+  },
+  {
+    "id": "u43",
+    "name": "Astral",
+    "minutes": 2280,
+    "type": "badge",
+    "icon": "🔮",
+    "data": {}
+  },
+  {
+    "id": "u44",
+    "name": "Celestial",
+    "minutes": 2340,
+    "type": "title",
+    "icon": "🌟",
+    "data": {
+      "title": "Celestial"
+    }
+  },
+  {
+    "id": "u45",
+    "name": "Divine",
+    "minutes": 2400,
+    "type": "color",
+    "icon": "😇",
+    "data": {
+      "color": "#ffffff"
+    }
+  },
+  {
+    "id": "u46",
+    "name": "Titan",
+    "minutes": 2460,
+    "type": "badge",
+    "icon": "🗿",
+    "data": {}
+  },
+  {
+    "id": "u47",
+    "name": "Overlord",
+    "minutes": 2520,
+    "type": "title",
+    "icon": "👑",
+    "data": {
+      "title": "Overlord"
+    }
+  },
+  {
+    "id": "u48",
+    "name": "Primordial",
+    "minutes": 2580,
+    "type": "color",
+    "icon": "🌋",
+    "data": {
+      "color": "#78716c"
+    }
+  },
+  {
+    "id": "u49",
+    "name": "Transcendent",
+    "minutes": 2640,
+    "type": "badge",
+    "icon": "🧘",
+    "data": {}
+  },
+  {
+    "id": "u50",
+    "name": "Absolute",
+    "minutes": 2700,
+    "type": "title",
+    "icon": "👁️",
+    "data": {
+      "title": "Absolute"
+    }
+  },
+  {
+    "id": "g1",
+    "name": "Neon Pulse",
+    "minutes": 240,
+    "type": "glow",
+    "icon": "💡",
+    "data": {
+      "glow": "0 0 20px rgba(245,158,11,0.6), 0 0 60px rgba(245,158,11,0.3)"
+    }
+  },
+  {
+    "id": "g2",
+    "name": "Cyber Edge",
+    "minutes": 720,
+    "type": "glow",
+    "icon": "⚡",
+    "data": {
+      "glow": "0 0 15px rgba(6,182,212,0.8), 0 0 40px rgba(6,182,212,0.3)"
+    }
+  },
+  {
+    "id": "g3",
+    "name": "Void Aura",
+    "minutes": 1500,
+    "type": "glow",
+    "icon": "🌑",
+    "data": {
+      "glow": "0 0 30px rgba(139,92,246,0.5), 0 0 80px rgba(139,92,246,0.2)"
+    }
+  },
+  {
+    "id": "g4",
+    "name": "Solar Flare",
+    "minutes": 2100,
+    "type": "glow",
+    "icon": "☀️",
+    "data": {
+      "glow": "0 0 25px rgba(251,191,36,0.7), 0 0 70px rgba(245,158,11,0.4)"
+    }
+  },
+  {
+    "id": "g5",
+    "name": "Abyssal",
+    "minutes": 2700,
+    "type": "glow",
+    "icon": "🌌",
+    "data": {
+      "glow": "0 0 35px rgba(236,72,153,0.5), inset 0 0 20px rgba(236,72,153,0.15)"
+    }
+  }
+]

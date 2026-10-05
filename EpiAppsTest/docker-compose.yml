@@ -1,0 +1,46 @@
+services:
+  epidoro:
+    image: python:3.11-slim
+    container_name: epidoro_beta
+    ports:
+      - "5005:5000"
+    volumes:
+      - ./data:/app/data
+      - ./epidoro/app.py:/app/app.py:ro
+      - ./epidoro/templates:/app/templates:ro
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir flask && python app.py"
+    restart: unless-stopped
+
+  epiproducitv:
+    image: python:3.11-slim
+    container_name: epiproducitv_beta
+    ports:
+      - "5006:5001"
+    volumes:
+      - ./data:/app/data
+      - ./epiproducitv/app.py:/app/app.py:ro
+      - ./epiproducitv/templates:/app/templates:ro
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir flask caldav && python app.py"
+    restart: unless-stopped
+    depends_on:
+      - epidoro
+
+  epimix:
+    image: python:3.11-slim
+    container_name: epimix_beta
+    ports:
+      - "5007:5002"
+    volumes:
+      - ./data:/app/data
+      - ./epimix/app.py:/app/app.py:ro
+      - ./epimix/templates:/app/templates:ro
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir flask && python app.py"
+    restart: unless-stopped
+    depends_on:
+      - epidoro

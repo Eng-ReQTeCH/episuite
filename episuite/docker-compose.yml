@@ -1,0 +1,26 @@
+name: episuite
+services:
+  episuite:
+    build: .
+    ports:
+      - "${EPISUITE_BIND_ADDRESS:-0.0.0.0}:${EPISUITE_PORT:-3210}:3210"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3210"
+      EPISUITE_TIMEZONE: "${EPISUITE_TIMEZONE:-Africa/Cairo}"
+      EPISUITE_OLLAMA_URL: "${EPISUITE_OLLAMA_URL:-http://host.docker.internal:11434/api/generate}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - episuite-data:/app/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+volumes:
+  episuite-data:

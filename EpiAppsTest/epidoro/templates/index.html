@@ -1,0 +1,2744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Epidoro</title>
+<meta name="theme-color" content="#0b1021">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link id="gf" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&family=VT323&display=swap">
+<style>
+  /* ─── Design Tokens ─── */
+  :root {
+    --primary: #f59e0b;
+    --primary-dark: #d97706;
+    --bg-color: #0b1021;
+    --card-bg: rgba(255,255,255,0.08);
+    --card-border: rgba(255,255,255,0.12);
+    --text-main: #f1f5f9;
+    --text-dim: #94a3b8;
+    --shadow: rgba(0,0,0,0.35);
+    --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-timer: 'Space Mono', monospace;
+    --ring-track: rgba(255,255,255,0.08);
+    --ring-progress: #ffffff;
+    --video-fit: cover;
+    --video-opacity: 0.35;
+    --bg-type: aurora;
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 22px;
+    --transition-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --transition-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    font-family: var(--font-main);
+    background: var(--bg-color);
+    color: var(--text-main);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
+  }
+
+  /* ─── Aurora Background ─── */
+  .bg-aurora {
+    position: fixed; inset: 0; z-index: 0;
+    background: linear-gradient(125deg, #0b1021 0%, #121a2e 50%, #0b1021 100%);
+    overflow: hidden;
+    transition: opacity 0.6s var(--transition-smooth);
+  }
+  body[data-bg="video"] .bg-aurora,
+  body[data-bg="solid"] .bg-aurora { opacity: 0; pointer-events: none; }
+
+  .blob {
+    position: absolute; border-radius: 50%;
+    filter: blur(80px); opacity: 0.45;
+    will-change: transform;
+    animation: blobFloat linear infinite;
+    transition: background 0.8s ease;
+  }
+  @keyframes blobFloat {
+    0%, 100% { transform: translate(0,0) scale(1); }
+    25%  { transform: translate(50px,-40px) scale(1.08); }
+    50%  { transform: translate(-30px,30px) scale(0.95); }
+    75%  { transform: translate(20px,40px) scale(1.04); }
+  }
+
+  /* Mood: Midnight (default) */
+  body[data-mood="midnight"] .blob.b1 { background: #3b82f6; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 28s; }
+  body[data-mood="midnight"] .blob.b2 { background: #8b5cf6; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 34s; animation-delay: -8s; }
+  body[data-mood="midnight"] .blob.b3 { background: #ec4899; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 22s; animation-delay: -12s; opacity: 0.35; }
+  body[data-mood="midnight"] .blob.b4 { background: #06b6d4; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 30s; animation-delay: -18s; }
+  body[data-mood="midnight"] .bg-aurora { background: linear-gradient(125deg, #0b1021 0%, #121a2e 50%, #0b1021 100%); }
+
+  /* Mood: Ocean */
+  body[data-mood="ocean"] .blob.b1 { background: #0ea5e9; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 28s; }
+  body[data-mood="ocean"] .blob.b2 { background: #0369a1; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 34s; animation-delay: -8s; }
+  body[data-mood="ocean"] .blob.b3 { background: #22d3ee; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 22s; animation-delay: -12s; opacity: 0.35; }
+  body[data-mood="ocean"] .blob.b4 { background: #0891b2; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 30s; animation-delay: -18s; }
+  body[data-mood="ocean"] .bg-aurora { background: linear-gradient(125deg, #082f49 0%, #0c4a6e 50%, #082f49 100%); }
+
+  /* Mood: Sunset */
+  body[data-mood="sunset"] .blob.b1 { background: #f59e0b; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 28s; }
+  body[data-mood="sunset"] .blob.b2 { background: #ef4444; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 34s; animation-delay: -8s; }
+  body[data-mood="sunset"] .blob.b3 { background: #f97316; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 22s; animation-delay: -12s; opacity: 0.35; }
+  body[data-mood="sunset"] .blob.b4 { background: #fbbf24; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 30s; animation-delay: -18s; }
+  body[data-mood="sunset"] .bg-aurora { background: linear-gradient(125deg, #451a03 0%, #7c2d12 50%, #451a03 100%); }
+
+  /* Mood: Sakura */
+  body[data-mood="sakura"] .blob.b1 { background: #f472b6; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 28s; }
+  body[data-mood="sakura"] .blob.b2 { background: #a78bfa; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 34s; animation-delay: -8s; }
+  body[data-mood="sakura"] .blob.b3 { background: #fb7185; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 22s; animation-delay: -12s; opacity: 0.35; }
+  body[data-mood="sakura"] .blob.b4 { background: #c084fc; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 30s; animation-delay: -18s; }
+  body[data-mood="sakura"] .bg-aurora { background: linear-gradient(125deg, #312e81 0%, #4c1d95 50%, #312e81 100%); }
+
+  /* ═══ NEW THEMES ═══ */
+
+  /* Mood: Zen Garden */
+  body[data-mood="zen"] .blob.b1 { background: #86efac; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 32s; }
+  body[data-mood="zen"] .blob.b2 { background: #4ade80; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 38s; animation-delay: -10s; }
+  body[data-mood="zen"] .blob.b3 { background: #22c55e; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 26s; animation-delay: -14s; opacity: 0.35; }
+  body[data-mood="zen"] .blob.b4 { background: #16a34a; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 34s; animation-delay: -20s; }
+  body[data-mood="zen"] .bg-aurora { background: linear-gradient(125deg, #052e16 0%, #14532d 50%, #052e16 100%); }
+
+  /* Mood: Neon Nights */
+  body[data-mood="neon"] .blob.b1 { background: #d946ef; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 24s; }
+  body[data-mood="neon"] .blob.b2 { background: #06b6d4; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 30s; animation-delay: -6s; }
+  body[data-mood="neon"] .blob.b3 { background: #f472b6; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 20s; animation-delay: -10s; opacity: 0.5; }
+  body[data-mood="neon"] .blob.b4 { background: #8b5cf6; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 28s; animation-delay: -16s; }
+  body[data-mood="neon"] .bg-aurora { background: linear-gradient(125deg, #0f0518 0%, #1a0b2e 50%, #0f0518 100%); }
+
+  /* Mood: Cozy Cabin */
+  body[data-mood="cozy"] .blob.b1 { background: #92400e; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 30s; }
+  body[data-mood="cozy"] .blob.b2 { background: #b45309; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 36s; animation-delay: -8s; }
+  body[data-mood="cozy"] .blob.b3 { background: #d97706; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 24s; animation-delay: -12s; opacity: 0.4; }
+  body[data-mood="cozy"] .blob.b4 { background: #f59e0b; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 32s; animation-delay: -18s; }
+  body[data-mood="cozy"] .bg-aurora { background: linear-gradient(125deg, #271c19 0%, #3f2e26 50%, #271c19 100%); }
+
+  /* Mood: Arctic Frost */
+  body[data-mood="arctic"] .blob.b1 { background: #cbd5e1; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 28s; }
+  body[data-mood="arctic"] .blob.b2 { background: #94a3b8; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 34s; animation-delay: -8s; }
+  body[data-mood="arctic"] .blob.b3 { background: #e2e8f0; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 22s; animation-delay: -12s; opacity: 0.35; }
+  body[data-mood="arctic"] .blob.b4 { background: #64748b; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 30s; animation-delay: -18s; }
+  body[data-mood="arctic"] .bg-aurora { background: linear-gradient(125deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); }
+
+  /* Mood: Synthwave */
+  body[data-mood="synthwave"] .blob.b1 { background: #e879f9; width: 55vw; height: 55vw; top: -15%; left: -10%; animation-duration: 26s; }
+  body[data-mood="synthwave"] .blob.b2 { background: #f43f5e; width: 45vw; height: 45vw; bottom: -10%; right: -10%; animation-duration: 32s; animation-delay: -8s; }
+  body[data-mood="synthwave"] .blob.b3 { background: #fbbf24; width: 35vw; height: 35vw; top: 35%; left: 35%; animation-duration: 22s; animation-delay: -12s; opacity: 0.4; }
+  body[data-mood="synthwave"] .blob.b4 { background: #f97316; width: 30vw; height: 30vw; top: 5%; right: 15%; animation-duration: 28s; animation-delay: -18s; }
+  body[data-mood="synthwave"] .bg-aurora { background: linear-gradient(125deg, #2e1065 0%, #4c1d95 50%, #2e1065 100%); }
+
+  /* ─── Video Background ─── */
+  #bg-video {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    object-fit: var(--video-fit);
+    opacity: var(--video-opacity);
+    z-index: 0; pointer-events: none;
+    display: none; transition: opacity 0.6s ease;
+  }
+  body[data-bg="video"] #bg-video { display: block; }
+
+  /* ─── Solid Background ─── */
+  body[data-bg="solid"] { background: var(--bg-color); }
+
+  /* ─── Running / Focus Mode ─── */
+  body.running::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 5;
+    pointer-events: none;
+    box-shadow: inset 0 0 160px rgba(0,0,0,0.45);
+    animation: vignetteBreath 4s ease-in-out infinite;
+  }
+  @keyframes vignetteBreath {
+    0%, 100% { box-shadow: inset 0 0 120px rgba(0,0,0,0.25); }
+    50%      { box-shadow: inset 0 0 200px rgba(0,0,0,0.55); }
+  }
+
+  body.running .timer-card {
+    animation: cardPulse 2.4s ease-in-out infinite;
+    border-color: rgba(255,255,255,0.25);
+  }
+  @keyframes cardPulse {
+    0%, 100% { box-shadow: 0 8px 32px var(--shadow), 0 0 0 0 rgba(255,255,255,0); }
+    50%      { box-shadow: 0 12px 48px var(--shadow), 0 0 40px 6px rgba(255,255,255,0.12); }
+  }
+
+  body.running .ring-progress {
+    filter: drop-shadow(0 0 8px rgba(255,255,255,0.9));
+    animation: ringGlow 1.4s ease-in-out infinite alternate;
+  }
+  @keyframes ringGlow {
+    from { filter: drop-shadow(0 0 4px rgba(255,255,255,0.5)); }
+    to   { filter: drop-shadow(0 0 16px rgba(255,255,255,1)); }
+  }
+
+  body.running #fox-icon {
+    animation: foxHop 0.55s ease-in-out infinite;
+  }
+  @keyframes foxHop {
+    0%, 100% { transform: translateX(-50%) translateY(0) rotate(0deg); }
+    25% { transform: translateX(-50%) translateY(-12px) rotate(-10deg); }
+    75% { transform: translateX(-50%) translateY(-4px) rotate(10deg); }
+  }
+
+  body.running .time-display {
+    animation: textBreath 2.4s ease-in-out infinite;
+  }
+  @keyframes textBreath {
+    0%, 100% { text-shadow: 0 2px 8px rgba(255,255,255,0.15), 0 0 0 rgba(255,255,255,0); }
+    50%      { text-shadow: 0 2px 8px rgba(255,255,255,0.15), 0 0 30px rgba(255,255,255,0.5); }
+  }
+
+  /* ─── Top Bar ─── */
+  .top-bar {
+    position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+    z-index: 20;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--card-bg);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    border: 1px solid var(--card-border);
+    padding: 6px 10px;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 4px 24px var(--shadow);
+    contain: layout style paint;
+    transition: box-shadow 0.3s ease;
+  }
+  .top-bar:hover { box-shadow: 0 6px 28px rgba(0,0,0,0.45); }
+  .logo {
+    font-weight: 800; font-size: 1.15rem;
+    background: linear-gradient(135deg, var(--primary), #fbbf24);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-right: 6px; letter-spacing: -0.5px; user-select: none;
+  }
+  .top-btn {
+    background: rgba(255,255,255,0.06);
+    border: none; width: 34px; height: 34px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim);
+    transition: all 0.2s var(--transition-smooth);
+    position: relative;
+  }
+  .top-btn:hover { background: rgba(255,255,255,0.14); color: var(--text-main); transform: translateY(-1px); }
+  .top-btn:active { transform: scale(0.92); }
+  .top-btn svg { width: 17px; height: 17px; fill: currentColor; }
+
+  .coins-display {
+    display: flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.06);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-weight: 700; font-size: 0.82rem;
+    color: #fbbf24;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .coins-display:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px); }
+  .coins-display .coin-icon { font-size: 1rem; }
+
+  .streak-display {
+    display: flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.06);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-weight: 700; font-size: 0.82rem;
+    color: #f97316;
+    cursor: default;
+    user-select: none;
+    transition: all 0.2s;
+  }
+  .streak-display:hover { background: rgba(255,255,255,0.1); }
+
+  .title-display {
+    font-size: 0.65rem; font-weight: 700; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.6px;
+    max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ─── Timer Card ─── */
+  .timer-card {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    width: min(440px, 92vw);
+    background: var(--card-bg);
+    backdrop-filter: blur(20px) saturate(1.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg);
+    padding: 30px 28px;
+    box-shadow: 0 8px 32px var(--shadow);
+    display: flex; flex-direction: column; align-items: center; gap: 22px;
+    contain: layout style paint;
+    cursor: grab;
+    user-select: none; -webkit-user-select: none;
+    touch-action: none;
+    transition: transform 0.5s var(--transition-bounce), box-shadow 0.3s ease, border-color 0.3s ease;
+  }
+  .timer-card.dragging {
+    cursor: grabbing;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    border-color: rgba(255,255,255,0.3);
+  }
+  .timer-card::before {
+    content: '';
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.2);
+    pointer-events: none;
+    transition: background 0.3s, width 0.3s;
+  }
+  .timer-card:hover::before { background: rgba(255,255,255,0.35); width: 44px; }
+
+  .card-controls {
+    display: flex; gap: 10px;
+  }
+  .card-btn {
+    width: 44px; height: 44px; border: none; border-radius: var(--radius-sm);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s var(--transition-smooth);
+    color: #fff; position: relative; overflow: hidden;
+  }
+  .card-btn::after {
+    content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0);
+    transition: background 0.2s;
+  }
+  .card-btn:hover::after { background: rgba(255,255,255,0.1); }
+  .card-btn:hover { transform: translateY(-2px) scale(1.05); }
+  .card-btn:active { transform: scale(0.95); }
+  .btn-play { background: linear-gradient(135deg, var(--primary), var(--primary-dark)); box-shadow: 0 4px 14px rgba(245,158,11,0.35); }
+  .btn-play:hover { box-shadow: 0 6px 20px rgba(245,158,11,0.45); }
+  .btn-reset, .btn-settings { background: rgba(255,255,255,0.1); }
+  .btn-reset:hover, .btn-settings:hover { background: rgba(255,255,255,0.18); }
+  .btn-mute { background: var(--primary); }
+  .btn-mute.muted { background: #475569; }
+  .card-btn svg { width: 20px; height: 20px; fill: currentColor; position: relative; z-index: 1; }
+
+  /* ─── Progress Ring ─── */
+  .progress-wrap {
+    position: relative;
+    width: 300px; height: 300px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .progress-wrap svg {
+    position: absolute; width: 100%; height: 100%;
+    transform: rotate(-90deg); overflow: visible;
+  }
+  .progress-wrap circle {
+    fill: none; stroke-width: 10; stroke-linecap: round;
+  }
+  .ring-track { stroke: var(--ring-track); }
+  .ring-progress {
+    stroke: var(--ring-progress);
+    transition: stroke-dashoffset 1s linear;
+    filter: drop-shadow(0 0 4px rgba(255,255,255,0.3));
+  }
+  .fox-icon {
+    position: absolute; top: -4px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 2.4rem;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+    pointer-events: none; user-select: none;
+    transition: transform 0.2s;
+  }
+  .time-display {
+    position: absolute;
+    font-family: var(--font-timer);
+    font-size: 6rem;
+    font-weight: 700;
+    color: var(--text-main);
+    letter-spacing: -2px;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.25);
+    line-height: 1;
+    user-select: none;
+    transition: text-shadow 0.3s;
+  }
+  .session-progress {
+    position: absolute; bottom: 70px;
+    font-size: 0.75rem; color: var(--text-dim);
+    font-weight: 600;
+    opacity: 0.8;
+  }
+
+  /* ─── Cycle & Active Task ─── */
+  .cycle-row {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.06);
+    padding: 6px 16px; border-radius: var(--radius-md);
+    font-size: 0.85rem; font-weight: 600; color: var(--text-dim);
+  }
+  .apples { display: flex; gap: 6px; }
+  .apple { width: 18px; height: 18px; opacity: 0.2; transition: all 0.4s var(--transition-bounce); }
+  .apple.filled { opacity: 1; transform: scale(1.15); }
+  .apple svg { width: 100%; height: 100%; fill: #ef4444; filter: drop-shadow(0 0 4px rgba(239,68,68,0.4)); }
+
+  .active-task-display {
+    font-size: 0.82rem; color: var(--text-dim); text-align: center;
+    max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-height: 1.3em; font-weight: 500; opacity: 0.9;
+  }
+  .active-task-display:empty::before { content: 'No active task'; opacity: 0.4; }
+
+  /* ─── Mode Tabs ─── */
+  .mode-tabs {
+    display: flex; gap: 8px; width: 100%;
+  }
+  .mode-tabs button {
+    flex: 1; padding: 10px 6px; border: none; border-radius: var(--radius-sm);
+    background: rgba(255,255,255,0.05);
+    color: var(--text-dim);
+    font-family: inherit; font-weight: 600; font-size: 0.78rem;
+    cursor: pointer; transition: all 0.25s var(--transition-smooth);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+    letter-spacing: 0.3px;
+  }
+  .mode-tabs button:hover { background: rgba(255,255,255,0.1); color: var(--text-main); }
+  .mode-tabs button.active {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: #fff; box-shadow: 0 4px 16px rgba(245,158,11,0.35);
+    transform: translateY(-1px);
+  }
+
+  /* ─── Modals ─── */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.45);
+    backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.35s var(--transition-smooth);
+    padding: 16px;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal {
+    background: #0f172a;
+    color: #e2e8f0;
+    width: min(640px, 100%);
+    max-height: 88vh; overflow-y: auto;
+    border-radius: var(--radius-lg);
+    padding: 26px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+    transform: scale(0.92) translateY(20px);
+    transition: transform 0.35s var(--transition-bounce);
+    display: flex; flex-direction: column;
+    contain: layout style paint;
+  }
+  .modal-overlay.open .modal { transform: scale(1) translateY(0); }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;
+  }
+  .modal-header h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.3px; }
+  .modal-close {
+    background: rgba(255,255,255,0.06); border: none; width: 32px; height: 32px;
+    border-radius: var(--radius-sm); font-size: 1.4rem; cursor: pointer; color: #94a3b8;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .modal-close:hover { background: rgba(255,255,255,0.12); color: #e2e8f0; }
+
+  .tabs {
+    display: flex; gap: 4px; margin-bottom: 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;
+  }
+  .tab-btn {
+    background: none; border: none; padding: 7px 14px; cursor: pointer;
+    font-weight: 600; font-size: 0.82rem; color: #64748b;
+    border-radius: var(--radius-sm); transition: all 0.2s;
+    position: relative;
+  }
+  .tab-btn:hover { background: rgba(255,255,255,0.05); color: #94a3b8; }
+  .tab-btn.active { color: var(--primary); background: rgba(245,158,11,0.1); }
+
+  .tab-panel { display: none; animation: fadeIn 0.25s ease; }
+  .tab-panel.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block; font-size: 0.72rem; font-weight: 700;
+    margin-bottom: 6px; color: #64748b; text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .field input[type="number"],
+  .field input[type="text"],
+  .field select,
+  .field input[type="file"] {
+    width: 100%; padding: 9px 11px; border-radius: var(--radius-sm);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-family: inherit; font-size: 0.92rem; color: #e2e8f0;
+    background: rgba(255,255,255,0.04);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+  }
+  .field input:focus, .field select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(245,158,11,0.15);
+  }
+  .field input[type="color"] {
+    width: 100%; height: 42px; border: none; border-radius: var(--radius-sm);
+    cursor: pointer; background: none; padding: 2px;
+  }
+  .field input[type="range"] { width: 100%; accent-color: var(--primary); }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .btn-save, .btn-action {
+    width: 100%; padding: 12px; border: none; border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: #fff; font-weight: 700; font-size: 0.95rem; cursor: pointer;
+    transition: filter 0.2s, transform 0.15s, box-shadow 0.2s;
+    box-shadow: 0 4px 16px rgba(245,158,11,0.3);
+  }
+  .btn-save:hover, .btn-action:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .btn-save:active, .btn-action:active { transform: scale(0.98); }
+  .btn-secondary {
+    background: rgba(255,255,255,0.06) !important;
+    color: #e2e8f0 !important;
+    box-shadow: none !important;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .btn-secondary:hover { background: rgba(255,255,255,0.1) !important; }
+  .test-sound {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+    padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer;
+    font-weight: 600; color: #e2e8f0; transition: all 0.2s;
+  }
+  .test-sound:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.15); }
+
+  /* ─── Quests ─── */
+  .quest-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+  .quest-list::-webkit-scrollbar { width: 5px; }
+  .quest-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+  .quest-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: var(--radius-sm);
+    transition: all 0.25s var(--transition-smooth);
+    animation: slideIn 0.3s var(--transition-bounce);
+  }
+  .quest-item:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.08); }
+  .quest-item.completed { opacity: 0.4; border-color: rgba(34,197,94,0.2); }
+  .quest-item.completed .quest-name { text-decoration: line-through; color: #64748b; }
+  .quest-item.completed .quest-icon { filter: grayscale(1); }
+  .quest-icon { font-size: 1.4rem; flex-shrink: 0; width: 28px; text-align: center; }
+  .quest-content { flex: 1; min-width: 0; }
+  .quest-name { font-size: 0.85rem; font-weight: 700; margin-bottom: 2px; color: var(--text-main); }
+  .quest-desc { font-size: 0.75rem; color: #64748b; line-height: 1.3; }
+  .quest-progress-wrap { width: 70px; flex-shrink: 0; text-align: right; }
+  .quest-progress-bar {
+    height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin-bottom: 4px;
+  }
+  .quest-progress-fill { height: 100%; background: var(--primary); border-radius: 2px; transition: width 0.3s ease; }
+  .quest-progress-text { font-size: 0.7rem; color: #64748b; font-weight: 600; }
+  .quest-reward { font-size: 0.75rem; color: #fbbf24; font-weight: 700; flex-shrink: 0; width: 44px; text-align: right; }
+
+  /* ─── Shop ─── */
+  .shop-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .shop-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s var(--transition-smooth);
+    position: relative;
+    overflow: hidden;
+  }
+  .shop-item:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); transform: translateY(-2px); }
+  .shop-item.owned { opacity: 0.5; cursor: default; }
+  .shop-item.owned::after {
+    content: 'OWNED';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.5);
+    font-size: 0.75rem; font-weight: 800; letter-spacing: 1px;
+    color: var(--primary);
+  }
+  .shop-item .shop-icon { font-size: 1.8rem; margin-bottom: 6px; }
+  .shop-item .shop-name { font-size: 0.78rem; font-weight: 600; margin-bottom: 4px; }
+  .shop-item .shop-price { font-size: 0.72rem; color: #fbbf24; font-weight: 700; }
+  .shop-item .shop-scaling { font-size: 0.65rem; color: #475569; }
+
+  .inventory-bar {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 16px; padding: 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255,255,255,0.04);
+  }
+  .inv-chip {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 10px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 20px;
+    font-size: 0.75rem; font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+  }
+  .inv-chip:hover { background: rgba(255,255,255,0.1); }
+  .inv-chip.equipped { border-color: var(--primary); background: rgba(245,158,11,0.1); }
+
+  /* ─── Time Unlockables ─── */
+  .unlock-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+    max-height: 50vh; overflow-y: auto; padding-right: 4px;
+  }
+  .unlock-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: var(--radius-sm);
+    padding: 12px 8px;
+    text-align: center;
+    transition: all 0.3s;
+    position: relative;
+  }
+  .unlock-item.unlocked {
+    background: rgba(245,158,11,0.06);
+    border-color: rgba(245,158,11,0.15);
+  }
+  .unlock-item.locked { opacity: 0.35; filter: grayscale(0.8); }
+  .unlock-item .unlock-icon { font-size: 1.6rem; margin-bottom: 4px; }
+  .unlock-item .unlock-name { font-size: 0.7rem; font-weight: 600; line-height: 1.2; }
+  .unlock-item .unlock-req { font-size: 0.6rem; color: #475569; margin-top: 2px; }
+  .unlock-item.unlocked .unlock-req { color: var(--primary); }
+
+  /* ─── Tasks ─── */
+  .task-input-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .task-input-row input[type="text"] { flex: 1; }
+  .task-input-row input[type="number"] { width: 80px; flex: none; }
+  .task-list { list-style: none; max-height: 52vh; overflow-y: auto; padding-right: 4px; }
+  .task-list::-webkit-scrollbar { width: 5px; }
+  .task-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+  .task-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: var(--radius-sm);
+    background: rgba(255,255,255,0.03);
+    margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.04);
+    transition: all 0.25s var(--transition-smooth);
+    animation: slideIn 0.3s var(--transition-bounce);
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .task-item:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08); }
+  .task-item.active-task { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.2); }
+  .task-item.completed { opacity: 0.35; }
+  .task-item.completed .task-text { text-decoration: line-through; }
+  .task-item input[type="checkbox"] {
+    width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary); flex-shrink: 0;
+  }
+  .task-text { flex: 1; font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-pomos { font-size: 0.72rem; color: #64748b; font-weight: 700; white-space: nowrap; letter-spacing: 0.3px; }
+  .task-active-btn {
+    font-size: 0.65rem; padding: 4px 8px; border-radius: 6px; border: none;
+    background: rgba(255,255,255,0.08); cursor: pointer; font-weight: 700; color: #94a3b8;
+    transition: all 0.2s; flex-shrink: 0;
+  }
+  .task-active-btn:hover { background: rgba(255,255,255,0.14); color: #e2e8f0; }
+  .task-active-btn.on { background: var(--primary); color: #0f172a; }
+  .task-del {
+    background: none; border: none; color: #ef4444; font-size: 1.2rem; cursor: pointer;
+    padding: 2px 6px; border-radius: 4px; line-height: 1; flex-shrink: 0;
+    opacity: 0.6; transition: all 0.2s;
+  }
+  .task-del:hover { opacity: 1; background: rgba(239,68,68,0.1); }
+
+  /* ─── Stats ─── */
+  .stats-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px;
+  }
+  .stat-box {
+    background: rgba(255,255,255,0.03); border-radius: var(--radius-md);
+    padding: 18px 14px; text-align: center; border: 1px solid rgba(255,255,255,0.04);
+    transition: transform 0.3s, border-color 0.3s;
+  }
+  .stat-box:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.08); }
+  .stat-box .stat-num { font-size: 1.9rem; font-weight: 800; color: var(--primary); line-height: 1; letter-spacing: -1px; }
+  .stat-box .stat-label { font-size: 0.68rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.6px; margin-top: 6px; font-weight: 700; }
+  .chart-wrap { width: 100%; height: 190px; margin: 14px 0; border-radius: var(--radius-sm); overflow: hidden; background: rgba(255,255,255,0.02); }
+  .chart-wrap canvas { width: 100%; height: 100%; display: block; }
+  .file-row { display: flex; gap: 8px; margin-top: 8px; }
+  .file-row > * { flex: 1; }
+  .hint { font-size: 0.75rem; color: #475569; margin-top: 4px; line-height: 1.4; }
+
+  /* ─── Toast ─── */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: #0f172a; color: #e2e8f0; padding: 11px 22px;
+    border-radius: var(--radius-md); font-size: 0.88rem; z-index: 200;
+    opacity: 0; transition: all 0.45s var(--transition-bounce);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    font-weight: 500; pointer-events: none;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+  /* ─── Achievement Popup ─── */
+  .achievement-popup {
+    position: fixed; top: 80px; right: 20px;
+    background: #0f172a;
+    border: 1px solid rgba(245,158,11,0.3);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    display: flex; align-items: center; gap: 12px;
+    z-index: 300;
+    transform: translateX(120%);
+    transition: transform 0.5s var(--transition-bounce);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    max-width: 280px;
+  }
+  .achievement-popup.show { transform: translateX(0); }
+  .achievement-popup .ach-icon { font-size: 1.8rem; }
+  .achievement-popup .ach-text { display: flex; flex-direction: column; }
+  .achievement-popup .ach-title { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700; }
+  .achievement-popup .ach-name { font-size: 0.9rem; font-weight: 700; color: var(--primary); }
+
+  /* ─── Celebration Particles ─── */
+  .particle {
+    position: fixed; border-radius: 50%; pointer-events: none; z-index: 999;
+    will-change: transform, opacity;
+  }
+
+  /* ─── Accessibility ─── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+    .blob { animation: none; }
+  }
+
+  /* ─── Responsive ─── */
+  @media (max-width: 480px) {
+    .timer-card { padding: 22px 18px; width: 94vw; }
+    .time-display { font-size: 4.2rem; letter-spacing: -1px; }
+    .progress-wrap { width: 240px; height: 240px; }
+    .fox-icon { font-size: 2rem; }
+    .top-bar { gap: 6px; padding: 5px 8px; top: 12px; }
+    .logo { font-size: 1rem; }
+    .modal { padding: 18px; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .row-2 { grid-template-columns: 1fr; }
+    .shop-grid { grid-template-columns: repeat(2, 1fr); }
+    .unlock-grid { grid-template-columns: repeat(3, 1fr); }
+    .quest-progress-wrap { width: 60px; }
+    .quest-reward { width: 38px; font-size: 0.7rem; }
+  }
+</style>
+</head>
+
+<body data-bg="aurora" data-mood="midnight">
+<div id="loader"><div class="loader-ring"></div></div>
+
+<!-- Aurora Background -->
+<div class="bg-aurora" id="bg-aurora">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="blob b4"></div>
+</div>
+
+<!-- Video Background -->
+<video id="bg-video" loop muted playsinline></video>
+
+<!-- Top Bar -->
+<nav class="top-bar" aria-label="Main navigation">
+  <div class="logo">epidoro</div>
+  <div class="sync-indicator" id="sync-indicator" title="Sync status"></div>
+  <div class="title-display" id="title-display"></div>
+  <div class="coins-display" id="coins-display" onclick="openShop()" title="Open Shop">
+    <span class="coin-icon">🪙</span>
+    <span id="coins-num">0</span>
+  </div>
+  <div class="streak-display" id="streak-display" title="Current streak">
+    <span>🔥</span><span id="streak-num">0</span>
+  </div>
+  <button class="top-btn" aria-label="Daily Quests" onclick="openQuests()">
+    <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+  </button>
+  <button class="top-btn" aria-label="Tasks" onclick="openTasks()">
+    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+  </button>
+  <button class="top-btn" aria-label="Statistics" onclick="openStats()">
+    <svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+  </button>
+  <button class="top-btn" aria-label="Achievements" onclick="openUnlockables()">
+    <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+  </button>
+  <button class="top-btn" aria-label="Fullscreen" onclick="toggleFullscreen()">
+    <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+  </button>
+</nav>
+
+<!-- Timer Card -->
+<main class="timer-card" id="timer-card" role="application" aria-label="Pomodoro timer">
+  <div class="card-controls">
+    <button class="card-btn btn-play" id="btn-play" aria-label="Start or pause timer">
+      <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      <svg id="icon-pause" viewBox="0 0 24 24" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+    </button>
+    <button class="card-btn btn-reset" id="btn-reset" aria-label="Reset timer">
+      <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+    </button>
+    <button class="card-btn btn-mute" id="btn-mute" aria-label="Toggle mute">
+      <svg id="icon-sound" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+      <svg id="icon-mute" viewBox="0 0 24 24" style="display:none"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73 4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+    </button>
+    <button class="card-btn btn-settings" id="btn-settings" aria-label="Open settings">
+      <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.488.488 0 0 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59.24 1.14-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+    </button>
+  </div>
+
+  <div class="progress-wrap" aria-live="polite" aria-atomic="true">
+    <svg viewBox="0 0 220 220" aria-hidden="true">
+      <circle class="ring-track" cx="110" cy="110" r="100"/>
+      <circle class="ring-progress" cx="110" cy="110" r="100" stroke-dasharray="628.32" stroke-dashoffset="0"/>
+    </svg>
+    <div class="fox-icon" id="fox-icon" aria-hidden="true">🦊</div>
+    <div class="time-display" id="time-display">25:00</div>
+    <div class="session-progress" id="session-progress"></div>
+  </div>
+
+  <div class="cycle-row" aria-label="Cycle progress">
+    <span>cycle <span id="cycle-num">1</span></span>
+    <div class="apples" id="apples" aria-hidden="true"></div>
+  </div>
+
+  <div class="active-task-display" id="active-task-display"></div>
+
+  <div class="mode-tabs" role="tablist" aria-label="Timer modes">
+    <button class="active" data-mode="pomodoro" role="tab" aria-selected="true">pomodoro</button>
+    <button data-mode="short" role="tab" aria-selected="false">short break</button>
+    <button data-mode="long" role="tab" aria-selected="false">long break</button>
+  </div>
+</main>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="modal-settings" role="dialog" aria-modal="true" aria-label="Settings">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="modal-close" onclick="closeModals()" aria-label="Close settings">&times;</button>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="timer" role="tab" aria-selected="true">Timer</button>
+      <button class="tab-btn" data-tab="look" role="tab" aria-selected="false">Appearance</button>
+      <button class="tab-btn" data-tab="sound" role="tab" aria-selected="false">Sound</button>
+      <button class="tab-btn" data-tab="sync" role="tab" aria-selected="false">Sync</button>
+      
+    </div>
+
+    <div class="tab-panel active" id="tab-timer">
+      <div class="row-2">
+        <div class="field"><label>Pomodoro (min)</label><input type="number" id="in-pomo" min="1" max="120" value="25"></div>
+        <div class="field"><label>Short Break (min)</label><input type="number" id="in-short" min="1" max="60" value="5"></div>
+      </div>
+      <div class="field"><label>Long Break (min)</label><input type="number" id="in-long" min="1" max="60" value="15"></div>
+      <div class="field">
+        <label>Partial Credit Threshold (%)</label>
+        <input type="range" id="in-threshold" min="50" max="100" step="5" value="90">
+        <div class="hint" id="threshold-hint">Sessions completed above 90% count toward stats</div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="tab-look">
+      <div class="field">
+        <label>Background Type</label>
+        <select id="in-bgtype">
+          <option value="aurora">Aurora (default)</option>
+          <option value="video">Custom Video</option>
+          <option value="solid">Solid Color</option>
+        </select>
+      </div>
+      <div class="field" id="wrap-mood">
+        <label>Aurora Mood</label>
+        <select id="in-mood">
+          <option value="midnight">Midnight</option>
+          <option value="ocean">Ocean</option>
+          <option value="sunset">Sunset</option>
+          <option value="sakura">Sakura</option>
+          <option value="zen">Zen Garden</option>
+          <option value="neon">Neon Nights</option>
+          <option value="cozy">Cozy Cabin</option>
+          <option value="arctic">Arctic Frost</option>
+          <option value="synthwave">Synthwave</option>
+        </select>
+      </div>
+      <div class="field" id="wrap-video" style="display:none;">
+        <label>Video File</label>
+        <input type="file" id="in-video" accept="video/*">
+      </div>
+      <div class="field" id="wrap-videofit" style="display:none;">
+        <label>Video Display Mode</label>
+        <select id="in-videofit">
+          <option value="cover">Cover (fill, crop)</option>
+          <option value="contain">Contain (fit all)</option>
+          <option value="fill">Stretch (distort)</option>
+          <option value="none">Original Size</option>
+          <option value="scale-down">Scale Down</option>
+        </select>
+      </div>
+      <div class="field" id="wrap-videoopa" style="display:none;">
+        <label>Video Opacity</label>
+        <input type="range" id="in-videoopa" min="0.1" max="1" step="0.05" value="0.35">
+      </div>
+      <div class="field" id="wrap-solid" style="display:none;">
+        <label>Background Color</label>
+        <input type="color" id="in-bg" value="#0b1021">
+      </div>
+      <div class="row-2">
+        <div class="field"><label>Primary Color</label><input type="color" id="in-primary" value="#f59e0b"></div>
+        <div class="field"><label>Timer Font</label>
+          <select id="in-font-timer">
+            <option value="Space Mono">Space Mono</option>
+            <option value="VT323">VT323 (Pixel)</option>
+            <option value="Inter">Inter</option>
+            <option value="Roboto Mono">Roboto Mono</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Fox Icon / Emoji</label>
+        <input type="text" id="in-fox" value="🦊" maxlength="2">
+      </div>
+    </div>
+
+    <div class="tab-panel" id="tab-sound">
+      <div class="field">
+        <label>Alarm Sound</label>
+        <select id="in-alarm">
+          <option value="chime">Chime</option>
+          <option value="beep">Beep</option>
+          <option value="bell">Bell</option>
+          <option value="digital">Digital</option>
+          <option value="custom">Custom Upload</option>
+          <option value="none">None</option>
+        </select>
+      </div>
+      <div class="field" id="wrap-custom-audio" style="display:none;">
+        <label>Upload Custom Alarm</label>
+        <input type="file" id="in-custom-audio" accept="audio/*">
+        <div class="hint">Custom sound is stored in your browser and persists across sessions.</div>
+      </div>
+      <div class="field">
+        <label>Volume</label>
+        <input type="range" id="in-vol" min="0" max="1" step="0.05" value="0.5">
+      </div>
+      <div class="field" style="display:flex; gap:10px; align-items:center;">
+        <button class="test-sound" id="btn-test-sound">🔔 Test Sound</button>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="tab-sync">
+      <div class="field">
+        <label>Auto Export on Exit</label>
+        <select id="in-autoexport">
+          <option value="off">Off</option>
+          <option value="download">Download JSON</option>
+          <option value="folder">Sync to Folder (File System API)</option>
+        </select>
+        <div class="hint">Automatically exports your stats when you close or refresh the page.</div>
+      </div>
+      <div class="field" id="wrap-syncfolder" style="display:none;">
+        <label>Sync Folder</label>
+        <button class="btn-action btn-secondary" onclick="chooseSyncFolder()">📁 Choose Folder</button>
+        <div class="hint" id="sync-folder-hint">No folder selected</div>
+      </div>
+      <div class="field">
+        <button class="btn-action btn-secondary" onclick="manualExport()">💾 Export Now</button>
+        <label class="btn-action btn-secondary" style="display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;margin-top:8px;">
+          📁 Import from File
+          <input type="file" id="in-import-file" accept=".json" onchange="manualImport(this)" style="display:none;">
+        </label>
+      </div>
+    </div>
+
+    <button class="btn-save" onclick="saveSettings()">Save & Apply</button>
+  </div>
+</div>
+
+<!-- Tasks Modal -->
+<div class="modal-overlay" id="modal-tasks" role="dialog" aria-modal="true" aria-label="Tasks">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Tasks</h2>
+      <button class="modal-close" onclick="closeModals()" aria-label="Close tasks">&times;</button>
+    </div>
+    <div class="task-input-row">
+      <input type="text" id="task-input" placeholder="What are you working on?" maxlength="120">
+      <input type="number" id="task-est" placeholder="Est. 🍅" min="1" max="20" value="1" title="Estimated Pomodoros">
+      <button class="btn-action" style="width:auto;padding:10px 16px;margin-top:0;" onclick="addTask()">Add</button>
+    </div>
+    <ul class="task-list" id="task-list" role="list"></ul>
+  </div>
+</div>
+
+<!-- Stats Modal -->
+<div class="modal-overlay" id="modal-stats" role="dialog" aria-modal="true" aria-label="Statistics">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Statistics</h2>
+      <button class="modal-close" onclick="closeModals()" aria-label="Close statistics">&times;</button>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-box"><div class="stat-num" id="st-today-pomo">0</div><div class="stat-label">Pomodoros Today</div></div>
+      <div class="stat-box"><div class="stat-num" id="st-today-focus">0</div><div class="stat-label">Focus Minutes Today</div></div>
+      <div class="stat-box"><div class="stat-num" id="st-total-pomo">0</div><div class="stat-label">Total Pomodoros</div></div>
+      <div class="stat-box"><div class="stat-num" id="st-total-focus">0</div><div class="stat-label">Total Focus Hours</div></div>
+      <div class="stat-box"><div class="stat-num" id="st-total-coins">0</div><div class="stat-label">Total Coins Earned</div></div>
+      <div class="stat-box"><div class="stat-num" id="st-current-coins">0</div><div class="stat-label">Current Coins</div></div>
+      <div class="stat-box"><div class="stat-num" id="st-streak">0</div><div class="stat-label">Day Streak</div></div>
+      <div class="stat-box"><div class="stat-num" id="st-multiplier">1.0x</div><div class="stat-label">Coin Multiplier</div></div>
+    </div>
+    <div style="font-weight:700;font-size:0.85rem;margin-bottom:8px;color:#64748b;letter-spacing:0.5px;text-transform:uppercase;">Last 7 Days</div>
+    <div class="chart-wrap"><canvas id="stats-chart"></canvas></div>
+    <div class="contrib-section">
+      <div style="font-weight:700;font-size:0.85rem;margin-bottom:8px;color:#64748b;letter-spacing:0.5px;text-transform:uppercase;">Focus History (Last Year)</div>
+      <div class="contrib-graph" id="contrib-graph"></div>
+      <div class="contrib-legend">
+        <span>Less</span>
+        <div class="contrib-cell"></div>
+        <div class="contrib-cell l1"></div>
+        <div class="contrib-cell l2"></div>
+        <div class="contrib-cell l3"></div>
+        <div class="contrib-cell l4"></div>
+        <span>More</span>
+      </div>
+    </div>
+    <div class="file-row">
+      <button class="btn-action btn-secondary" onclick="exportStats()">💾 Export Stats</button>
+      <label class="btn-action btn-secondary" style="display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;">
+        📁 Import Stats
+        <input type="file" id="in-stats-file" accept=".json" onchange="importStats(this)" style="display:none;">
+      </label>
+    </div>
+  </div>
+</div>
+
+<!-- Shop Modal -->
+<div class="modal-overlay" id="modal-shop" role="dialog" aria-modal="true" aria-label="Shop">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>🛒 Coin Shop</h2>
+      <button class="modal-close" onclick="closeModals()" aria-label="Close shop">&times;</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+      <span style="font-size:1.2rem;">🪙</span>
+      <span id="shop-coins" style="font-weight:800;font-size:1.1rem;color:#fbbf24;">0</span>
+      <span style="color:#64748b;font-size:0.8rem;">coins available</span>
+    </div>
+    <div style="font-size:0.8rem;color:#64748b;margin-bottom:14px;">
+      Spend your earned coins on screen time rewards. Prices increase with each purchase.
+    </div>
+    <div class="shop-grid" id="shop-rewards"></div>
+
+    <!-- Redeem Section -->
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.06);">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <span style="font-size:1.1rem;">⏱️</span>
+        <span style="font-weight:700;font-size:0.95rem;">Redeem Screen Time</span>
+        <span id="redeem-minutes-display" style="margin-left:auto;font-weight:700;font-size:0.85rem;color:#fbbf24;">0 min available</span>
+      </div>
+      <div id="redeem-active-section" style="display:none;">
+        <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:var(--radius-md);padding:14px;text-align:center;">
+          <div style="font-size:1.8rem;font-weight:800;color:#fbbf24;font-family:var(--font-timer);" id="redeem-countdown">00:00</div>
+          <div style="font-size:0.75rem;color:#64748b;margin-top:4px;">screen time remaining</div>
+          <button class="btn-action" style="width:auto;padding:8px 20px;margin-top:10px;background:rgba(239,68,68,0.2) !important;color:#ef4444 !important;box-shadow:none !important;border:1px solid rgba(239,68,68,0.3) !important;" onclick="stopRedemption()">Stop Redeeming</button>
+        </div>
+      </div>
+      <div id="redeem-inactive-section">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-action btn-secondary" style="width:auto;padding:8px 14px;font-size:0.78rem;" onclick="startRedemption(5)">Redeem 5min</button>
+          <button class="btn-action btn-secondary" style="width:auto;padding:8px 14px;font-size:0.78rem;" onclick="startRedemption(10)">Redeem 10min</button>
+          <button class="btn-action btn-secondary" style="width:auto;padding:8px 14px;font-size:0.78rem;" onclick="startRedemption(15)">Redeem 15min</button>
+          <button class="btn-action btn-secondary" style="width:auto;padding:8px 14px;font-size:0.78rem;" onclick="startRedemption(30)">Redeem 30min</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quests Modal -->
+<div class="modal-overlay" id="modal-quests" role="dialog" aria-modal="true" aria-label="Daily Quests">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>📋 Daily Directives</h2>
+      <button class="modal-close" onclick="closeModals()" aria-label="Close quests">&times;</button>
+    </div>
+    <div style="font-size:0.8rem;color:#64748b;margin-bottom:12px;">
+      New directives generated every day. Stanley would be proud.
+    </div>
+    <div class="quest-list" id="quest-list"></div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:0.75rem;color:#475569;">Complete all for bragging rights</span>
+      <span style="font-size:0.8rem;font-weight:700;color:var(--primary);">
+        <span id="quest-progress">0</span>/10 done
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- Unlockables Modal -->
+<div class="modal-overlay" id="modal-unlockables" role="dialog" aria-modal="true" aria-label="Achievements">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>🏆 Time Unlocks</h2>
+      <button class="modal-close" onclick="closeModals()" aria-label="Close achievements">&times;</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+      <span style="font-size:0.8rem;color:#64748b;">Total Focus Time:</span>
+      <span id="unlock-focus-time" style="font-weight:700;font-size:0.9rem;color:var(--primary);">0 min</span>
+    </div>
+    <div style="font-size:0.78rem;color:#64748b;margin-bottom:12px;line-height:1.4;">
+      Unlock badges, titles, and name colors by spending time in focus mode. 
+      <strong>Click unlocked titles/colors to equip them.</strong>
+    </div>
+    <div class="unlock-grid" id="unlock-grid"></div>
+  </div>
+</div>
+
+<!-- Achievement Popup -->
+<div class="achievement-popup" id="achievement-popup">
+  <div class="ach-icon" id="ach-icon">🏆</div>
+  <div class="ach-text">
+    <div class="ach-title">Achievement Unlocked</div>
+    <div class="ach-name" id="ach-name">Name</div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ═══════════════════════════════════════
+   DATA & CONFIG
+   ═══════════════════════════════════════ */
+const defaultConfig = {
+  durations: { pomodoro: 25, short: 5, long: 15 },
+  colors: { primary: '#f59e0b', bg: '#0b1021' },
+  fontTimer: 'Space Mono',
+  mood: 'midnight',
+  fox: '🦊',
+  alarm: 'chime',
+  volume: 0.5,
+  muted: false,
+  bgType: 'aurora',
+  videoFit: 'cover',
+  videoOpacity: 0.35,
+  partialThreshold: 90
+};
+
+let config = JSON.parse(JSON.stringify(defaultConfig));
+try { const saved = localStorage.getItem('epidoro_config'); if (saved) config = JSON.parse(saved); } catch(e){}
+
+let state = {
+  mode: 'pomodoro',
+  timeLeft: config.durations.pomodoro * 60,
+  totalTime: config.durations.pomodoro * 60,
+  running: false,
+  cycle: 1,
+  timerId: null,
+  sessionSeconds: 0,
+  lastTick: 0,
+  wasPausedThisSession: false
+};
+
+let tasks = [];
+try { const t = localStorage.getItem('epidoro_tasks'); if (t) tasks = JSON.parse(t); } catch(e){}
+
+let stats = {
+  days: {},
+  allTime: { pomodoros: 0, focusMinutes: 0, tasksCompleted: 0, coins: 0, totalCoinsEarned: 0 },
+  shopPurchases: {},
+  equippedTitle: null,
+  equippedColor: null,
+  unlockedTimeItems: [],
+  customShopItems: [],
+  streak: { current: 0, lastActiveDate: null },
+  dailyQuests: null,
+  dailyCounters: null
+};
+try { const s = localStorage.getItem('epidoro_stats'); if (s) stats = JSON.parse(s); } catch(e){}
+
+// Robust initialization for new/legacy saves
+stats.allTime.coins = Number(stats.allTime.coins) || 0;
+stats.allTime.totalCoinsEarned = Number(stats.allTime.totalCoinsEarned) || stats.allTime.coins;
+if (!stats.shopPurchases) stats.shopPurchases = {};
+if (!stats.equippedTitle) stats.equippedTitle = null;
+if (!stats.equippedColor) stats.equippedColor = null;
+if (!stats.unlockedTimeItems) stats.unlockedTimeItems = [];
+if (!stats.customShopItems) stats.customShopItems = [];
+if (!stats.streak) stats.streak = { current: 0, lastActiveDate: null };
+if (!stats.dailyQuests) stats.dailyQuests = null;
+if (!stats.dailyCounters) stats.dailyCounters = null;
+
+let customAudioBlob = null, customAudioUrl = null;
+let lsTimer = null;
+let syncFolderHandle = null;
+
+/* ═══════════════════════════════════════
+   DAILY QUEST TEMPLATES (Stanley Parable inspired)
+   ═══════════════════════════════════════ */
+const DAILY_QUEST_TEMPLATES = [
+  { id: 'focus_mins', type: 'focus', base: 60, variance: 30, name: 'The Button Pressers', desc: 'Focus for {target} minutes today' },
+  { id: 'pomos_count', type: 'pomos', base: 3, variance: 2, name: 'Employee of the Minute', desc: 'Complete {target} pomodoros today' },
+  { id: 'mood_pomos', type: 'mood_pomos', base: 2, variance: 2, name: 'Neon Nights Compliance', desc: 'Complete {target} pomodoros in the {mood} theme', moods: ['neon','synthwave','midnight','ocean','sunset','sakura','zen','cozy','arctic'] },
+  { id: 'spend_coins', type: 'spend', base: 40, variance: 30, name: 'Capitalist Stanley', desc: 'Spend {target} coins in the shop' },
+  { id: 'tasks_done', type: 'tasks', base: 2, variance: 2, name: 'Following Instructions', desc: 'Complete {target} tasks today' },
+  { id: 'long_breaks', type: 'long_breaks', base: 1, variance: 1, name: 'The Adventure Line™', desc: 'Take {target} long breaks today' },
+  { id: 'no_pause', type: 'no_pause', base: 1, variance: 0, name: 'You Can\'t Pause Stanley', desc: 'Complete a full pomodoro without pausing' },
+  { id: 'reset_timer', type: 'resets', base: 2, variance: 3, name: 'Setting Yourself Up For Failure', desc: 'Reset the timer {target} times today' },
+  { id: 'switch_modes', type: 'modes', base: 4, variance: 4, name: 'Indecision Is Decision', desc: 'Switch timer modes {target} times today' },
+  { id: 'drag_card', type: 'drags', base: 3, variance: 5, name: 'Out of Map Bounds', desc: 'Drag the timer card {target} times today' },
+  { id: 'mute_toggle', type: 'mutes', base: 3, variance: 3, name: 'The Sound of Silence', desc: 'Toggle mute {target} times today' },
+  { id: 'open_settings', type: 'settings', base: 2, variance: 3, name: 'Bureaucratic Necessity', desc: 'Open settings {target} times today' },
+  { id: 'shop_visit', type: 'shop', base: 2, variance: 2, name: 'Window Shopping', desc: 'Visit the shop {target} times today' },
+  { id: 'full_cycle', type: 'cycle', base: 1, variance: 0, name: 'The End Is Never The End', desc: 'Complete a full 4-pomodoro cycle today' },
+  { id: 'short_breaks', type: 'short_breaks', base: 2, variance: 2, name: 'Procrastination Protocol', desc: 'Take {target} short breaks today' }
+];
+
+/* ═══════════════════════════════════════
+   TIME UNLOCKABLES (50 items)
+   Types: badge, title, color
+   ═══════════════════════════════════════ */
+const TIME_UNLOCKABLES = [
+  // Early badges
+  { id:'u1',  name:'First Spark',    minutes:15,  type:'badge', icon:'✨' },
+  { id:'u2',  name:'Early Bird',     minutes:30,  type:'badge', icon:'🐦' },
+  { id:'u3',  name:'Sprout',         minutes:60,  type:'badge', icon:'🌱' },
+  { id:'u4',  name:'Deep Breath',    minutes:90,  type:'badge', icon:'🫁' },
+  { id:'u5',  name:'Seedling',       minutes:120, type:'badge', icon:'🌿' },
+  { id:'u6',  name:'Green Thumb',    minutes:150, type:'color', icon:'👍', data:{color:'#22c55e'} },
+  { id:'u7',  name:'Flow State',     minutes:180, type:'badge', icon:'🌊' },
+  { id:'u8',  name:'Steady Pace',    minutes:210, type:'title', icon:'🚶', data:{title:'Steady'} },
+  { id:'u9',  name:'Sapling',        minutes:240, type:'badge', icon:'🌳' },
+  { id:'u10', name:'Hourglass',      minutes:300, type:'badge', icon:'⏳' },
+  // Mid titles
+  { id:'u11', name:'Apprentice',     minutes:360, type:'title', icon:'🎓', data:{title:'Apprentice'} },
+  { id:'u12', name:'Disciplined',    minutes:420, type:'title', icon:'⛓️', data:{title:'Disciplined'} },
+  { id:'u13', name:'Marathoner',     minutes:480, type:'title', icon:'🏃', data:{title:'Marathoner'} },
+  { id:'u14', name:'Iron Will',      minutes:540, type:'badge', icon:'🛡️' },
+  { id:'u15', name:'Scholar',        minutes:600, type:'title', icon:'📚', data:{title:'Scholar'} },
+  { id:'u16', name:'Burning Flame',  minutes:660, type:'color', icon:'🔥', data:{color:'#ef4444'} },
+  { id:'u17', name:'Deep Diver',     minutes:720, type:'badge', icon:'🤿' },
+  { id:'u18', name:'Timekeeper',     minutes:780, type:'title', icon:'🕰️', data:{title:'Timekeeper'} },
+  { id:'u19', name:'Crystal Focus',  minutes:840, type:'color', icon:'💎', data:{color:'#3b82f6'} },
+  { id:'u20', name:'Zen Master',     minutes:900, type:'title', icon:'☯️', data:{title:'Zen Master'} },
+  // Late game
+  { id:'u21', name:'Shadow Walker',  minutes:960, type:'badge', icon:'🥷' },
+  { id:'u22', name:'Golden Leaf',    minutes:1020,type:'color', icon:'🍂', data:{color:'#f59e0b'} },
+  { id:'u23', name:'Storm Rider',    minutes:1080,type:'title', icon:'⛈️', data:{title:'Storm Rider'} },
+  { id:'u24', name:'Star Gazer',     minutes:1140,type:'badge', icon:'🔭' },
+  { id:'u25', name:'Moon Child',     minutes:1200,type:'color', icon:'🌙', data:{color:'#a78bfa'} },
+  { id:'u26', name:'Sun Warrior',    minutes:1260,type:'title', icon:'☀️', data:{title:'Sun Warrior'} },
+  { id:'u27', name:'Ocean Soul',     minutes:1320,type:'color', icon:'🌊', data:{color:'#0ea5e9'} },
+  { id:'u28', name:'Mountain Peak',  minutes:1380,type:'badge', icon:'🏔️' },
+  { id:'u29', name:'Eagle Eye',      minutes:1440,type:'title', icon:'🦅', data:{title:'Eagle Eye'} },
+  { id:'u30', name:'Phoenix',        minutes:1500,type:'color', icon:'🔥', data:{color:'#f97316'} },
+  { id:'u31', name:'Void Walker',    minutes:1560,type:'badge', icon:'🌑' },
+  { id:'u32', name:'Light Bringer',  minutes:1620,type:'title', icon:'💡', data:{title:'Light Bringer'} },
+  { id:'u33', name:'Cosmic Dust',    minutes:1680,type:'color', icon:'✨', data:{color:'#ec4899'} },
+  { id:'u34', name:'Nebula',         minutes:1740,type:'badge', icon:'🌌' },
+  { id:'u35', name:'Galaxy Brain',   minutes:1800,type:'title', icon:'🧠', data:{title:'Galaxy Brain'} },
+  { id:'u36', name:'Supernova',      minutes:1860,type:'color', icon:'💥', data:{color:'#eab308'} },
+  { id:'u37', name:'Black Hole',     minutes:1920,type:'badge', icon:'🕳️' },
+  { id:'u38', name:'Time Lord',      minutes:1980,type:'title', icon:'⏱️', data:{title:'Time Lord'} },
+  { id:'u39', name:'Ethereal',       minutes:2040,type:'color', icon:'👻', data:{color:'#94a3b8'} },
+  { id:'u40', name:'Infinity',       minutes:2100,type:'badge', icon:'♾️' },
+  { id:'u41', name:'Eternal',        minutes:2160,type:'title', icon:'♾️', data:{title:'Eternal'} },
+  { id:'u42', name:'Radiant',        minutes:2220,type:'color', icon:'☀️', data:{color:'#fbbf24'} },
+  { id:'u43', name:'Astral',         minutes:2280,type:'badge', icon:'🔮' },
+  { id:'u44', name:'Celestial',      minutes:2340,type:'title', icon:'🌟', data:{title:'Celestial'} },
+  { id:'u45', name:'Divine',         minutes:2400,type:'color', icon:'😇', data:{color:'#ffffff'} },
+  { id:'u46', name:'Titan',          minutes:2460,type:'badge', icon:'🗿' },
+  { id:'u47', name:'Overlord',       minutes:2520,type:'title', icon:'👑', data:{title:'Overlord'} },
+  { id:'u48', name:'Primordial',     minutes:2580,type:'color', icon:'🌋', data:{color:'#78716c'} },
+  { id:'u49', name:'Transcendent',   minutes:2640,type:'badge', icon:'🧘' },
+  { id:'u50', name:'Absolute',       minutes:2700,type:'title', icon:'👁️', data:{title:'Absolute'} },
+  /* ─── GLOW UNLOCKABLES ─── */
+  { id:'g1',  name:'Neon Pulse',     minutes:240, type:'glow',  icon:'💡', data:{glow:'0 0 20px rgba(245,158,11,0.6), 0 0 60px rgba(245,158,11,0.3)'} },
+  { id:'g2',  name:'Cyber Edge',     minutes:720, type:'glow',  icon:'⚡', data:{glow:'0 0 15px rgba(6,182,212,0.8), 0 0 40px rgba(6,182,212,0.3)'} },
+  { id:'g3',  name:'Void Aura',      minutes:1500,type:'glow',  icon:'🌑', data:{glow:'0 0 30px rgba(139,92,246,0.5), 0 0 80px rgba(139,92,246,0.2)'} },
+  { id:'g4',  name:'Solar Flare',    minutes:2100,type:'glow',  icon:'☀️', data:{glow:'0 0 25px rgba(251,191,36,0.7), 0 0 70px rgba(245,158,11,0.4)'} },
+  { id:'g5',  name:'Abyssal',        minutes:2700,type:'glow',  icon:'🌌', data:{glow:'0 0 35px rgba(236,72,153,0.5), inset 0 0 20px rgba(236,72,153,0.15)'} }
+];
+
+/* ═══════════════════════════════════════
+   SHOP ITEMS — COIN REWARDS ONLY
+   ═══════════════════════════════════════ */
+function getBaseShopItems() {
+  return [
+    { id:'sc5',  name:'5 Min Screen Time',  type:'reward', basePrice:40,  scaling:1.4, icon:'📱', data:{minutes:5} },
+    { id:'sc10', name:'10 Min Screen Time', type:'reward', basePrice:75,  scaling:1.5, icon:'📱', data:{minutes:10} },
+    { id:'sc15', name:'15 Min Screen Time', type:'reward', basePrice:100, scaling:1.5, icon:'📱', data:{minutes:15} },
+    { id:'sc30', name:'30 Min Screen Time', type:'reward', basePrice:180, scaling:1.6, icon:'📱', data:{minutes:30} }
+  ];
+}
+
+function getAllShopItems() {
+  return getBaseShopItems().concat(stats.customShopItems || []);
+}
+
+/* ═══════════════════════════════════════
+   DOM SHORTCUTS
+   ═══════════════════════════════════════ */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+const card = document.getElementById('timer-card');
+
+/* ═══════════════════════════════════════
+   INDEXEDDB
+   ═══════════════════════════════════════ */
+let idbDB = null;
+function openIDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open('epidoro', 2);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs', {keyPath:'id'});
+      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', {keyPath:'id'});
+    };
+    req.onsuccess = e => { idbDB = e.target.result; res(idbDB); };
+    req.onerror = e => rej(e);
+  });
+}
+async function idbPut(store, id, data) {
+  if (!idbDB) await openIDB();
+  return new Promise((res,rej)=>{
+    const tx = idbDB.transaction(store,'readwrite');
+    tx.objectStore(store).put({id, data});
+    tx.oncomplete = res; tx.onerror = rej;
+  });
+}
+async function idbGet(store, id) {
+  if (!idbDB) await openIDB();
+  return new Promise((res,rej)=>{
+    const tx = idbDB.transaction(store,'readonly');
+    const req = tx.objectStore(store).get(id);
+    req.onsuccess = e => res(e.target.result?.data || null);
+    req.onerror = rej;
+  });
+}
+(async () => {
+  await openIDB();
+  const blob = await idbGet('blobs', 'alarm');
+  if (blob) { customAudioBlob = blob; customAudioUrl = URL.createObjectURL(blob); }
+  const handle = await idbGet('meta', 'syncFolder');
+  if (handle) syncFolderHandle = handle;
+})();
+
+/* ═══════════════════════════════════════
+   PERSISTENCE
+   ═══════════════════════════════════════ */
+let syncState = 'idle';
+function updateSyncIndicator() {
+    const el = document.getElementById('sync-indicator');
+    if (!el) return;
+    el.className = 'sync-indicator';
+    if (syncState === 'saving') el.classList.add('saving');
+    else if (syncState === 'error') el.classList.add('error');
+}
+function syncToServer() {
+    syncState = 'saving';
+    updateSyncIndicator();
+    const payload = { stats, tasks, config };
+    fetch('/api/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(r => {
+        syncState = r.ok ? 'synced' : 'error';
+        updateSyncIndicator();
+    }).catch(() => {
+        syncState = 'error';
+        updateSyncIndicator();
+    });
+    clearTimeout(lsTimer);
+    lsTimer = setTimeout(() => {
+        try { localStorage.setItem('epidoro_backup', JSON.stringify(payload)); } catch(e){}
+    }, 400);
+}
+function persist() {
+    syncToServer();
+}
+
+/* ═══════════════════════════════════════
+   DRAGGABLE CARD
+   ═══════════════════════════════════════ */
+let pos = { x: 0, y: 0 };
+let isDragging = false;
+let dragStart = { x: 0, y: 0, px: 0, py: 0 };
+let lastMouse = { x: 0, y: 0, t: 0 };
+let velocity = { x: 0, y: 0 };
+let dragRaf = null, inertiaRaf = null;
+
+function clampPos(x, y) {
+  const pad = 20;
+  const maxX = Math.max(0, (window.innerWidth - card.offsetWidth) / 2 - pad);
+  const maxY = Math.max(0, (window.innerHeight - card.offsetHeight) / 2 - pad);
+  return { x: Math.max(-maxX, Math.min(maxX, x)), y: Math.max(-maxY, Math.min(maxY, y)) };
+}
+
+function setCardTransform(x, y, scale = 1, rot = 0) {
+  const c = clampPos(x, y);
+  pos.x = c.x; pos.y = c.y;
+  card.style.transform = `translate(-50%, -50%) translate3d(${c.x.toFixed(1)}px, ${c.y.toFixed(1)}px, 0) scale(${scale}) rotate(${rot.toFixed(2)}deg)`;
+}
+
+function startDrag(ex, ey) {
+  isDragging = true;
+  dragStart.x = ex; dragStart.y = ey;
+  dragStart.px = pos.x; dragStart.py = pos.y;
+  lastMouse = { x: ex, y: ey, t: performance.now() };
+  velocity = { x: 0, y: 0 };
+  card.style.transition = 'none';
+  card.classList.add('dragging');
+  document.body.style.cursor = 'grabbing';
+  if (inertiaRaf) cancelAnimationFrame(inertiaRaf);
+}
+
+function moveDrag(ex, ey) {
+  if (!isDragging) return;
+  const now = performance.now();
+  const dt = now - lastMouse.t;
+  if (dt > 0) {
+    velocity.x = (ex - lastMouse.x) / dt * 16;
+    velocity.y = (ey - lastMouse.y) / dt * 16;
+  }
+  lastMouse = { x: ex, y: ey, t: now };
+  if (dragRaf) cancelAnimationFrame(dragRaf);
+  dragRaf = requestAnimationFrame(() => {
+    const dx = dragStart.px + (ex - dragStart.x);
+    const dy = dragStart.py + (ey - dragStart.y);
+    const rot = dx * 0.012;
+    setCardTransform(dx, dy, 1.03, rot);
+  });
+}
+
+function endDrag() {
+  if (!isDragging) return;
+  isDragging = false;
+  card.classList.remove('dragging');
+  document.body.style.cursor = '';
+  
+  // Track drag if card actually moved from center
+  if (Math.abs(pos.x) > 2 || Math.abs(pos.y) > 2) {
+    const today = getTodayKey();
+    if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+    stats.dailyCounters.drags = (stats.dailyCounters.drags || 0) + 1;
+    checkQuestCompletion();
+  }
+  
+  if (Math.abs(velocity.x) > 0.4 || Math.abs(velocity.y) > 0.4) {
+    startInertia();
+  } else {
+    card.style.transition = 'transform 0.55s var(--transition-bounce)';
+    setCardTransform(pos.x, pos.y, 1, 0);
+  }
+}
+
+function startInertia() {
+  function step() {
+    velocity.x *= 0.88; velocity.y *= 0.88;
+    const nx = pos.x + velocity.x;
+    const ny = pos.y + velocity.y;
+    const rot = nx * 0.012;
+    setCardTransform(nx, ny, 1, rot);
+    if (Math.abs(velocity.x) > 0.15 || Math.abs(velocity.y) > 0.15) {
+      inertiaRaf = requestAnimationFrame(step);
+    } else {
+      card.style.transition = 'transform 0.55s var(--transition-bounce)';
+      setCardTransform(pos.x, pos.y, 1, 0);
+    }
+  }
+  step();
+}
+
+card.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  if (e.target.closest('button, input, select, textarea, a, [contenteditable]')) return;
+  startDrag(e.clientX, e.clientY);
+  e.preventDefault();
+});
+window.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+window.addEventListener('mouseup', endDrag);
+
+card.addEventListener('touchstart', e => {
+  if (e.target.closest('button, input, select, textarea, a')) return;
+  startDrag(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+window.addEventListener('touchmove', e => {
+  if (!isDragging) return;
+  e.preventDefault();
+  moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+window.addEventListener('touchend', endDrag);
+
+card.addEventListener('dblclick', e => {
+  if (e.target.closest('button, input')) return;
+  pos.x = 0; pos.y = 0;
+  card.style.transition = 'transform 0.7s var(--transition-bounce)';
+  setCardTransform(0, 0, 1, 0);
+});
+
+window.addEventListener('resize', () => {
+  card.style.transition = 'transform 0.4s var(--transition-smooth)';
+  setCardTransform(pos.x, pos.y, 1, 0);
+});
+
+/* ═══════════════════════════════════════
+   TIMER ENGINE (with partial credit)
+   ═══════════════════════════════════════ */
+function formatTime(sec) {
+  const m = Math.floor(sec/60).toString().padStart(2,'0');
+  const s = (sec%60).toString().padStart(2,'0');
+  return `${m}:${s}`;
+}
+function setProgress(pct) {
+  const circle = document.querySelector('.ring-progress');
+  const circum = 2 * Math.PI * 100;
+  circle.style.strokeDashoffset = circum - (pct/100) * circum;
+}
+function updateDisplay() {
+  $('#time-display').textContent = formatTime(state.timeLeft);
+  const pct = state.totalTime > 0 ? (state.timeLeft / state.totalTime) * 100 : 0;
+  setProgress(pct);
+  $('#cycle-num').textContent = state.cycle;
+  renderApples();
+  updateActiveTaskDisplay();
+  const elapsed = state.sessionSeconds;
+  const total = state.totalTime;
+  const pctDone = total > 0 ? Math.round((elapsed / total) * 100) : 0;
+  const remaining = Math.max(0, total - elapsed);
+  $('#session-progress').textContent = state.mode === 'pomodoro' ? `${pctDone}% · ${Math.ceil(remaining/60)}m remaining` : '';
+}
+function renderApples() {
+  const c = $('#apples'); c.innerHTML = '';
+  for (let i=1; i<=4; i++) {
+    const filled = i <= state.cycle;
+    const d = document.createElement('div');
+    d.className = 'apple' + (filled ? ' filled' : '');
+    d.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 2c-1.1 0-2 .9-2 2 0 .74.4 1.38 1 1.72V5h2v.72c.6-.34 1-.98 1-1.72 0-1.1-.9-2-2-2zM6 20c0 2.21 1.79 4 4 4h4c2.21 0 4-1.79 4-4v-7H6v7z"/></svg>`;
+    c.appendChild(d);
+  }
+}
+function updateActiveTaskDisplay() {
+  const el = $('#active-task-display');
+  const active = tasks.find(t => t.active && !t.completed);
+  el.textContent = active ? `▸ ${active.text}` : '';
+}
+function switchMode(mode) {
+  if (state.mode === 'pomodoro' && state.sessionSeconds > 0) {
+    maybeAwardPartial(state.sessionSeconds, state.totalTime);
+  }
+  pauseTimer();
+  state.mode = mode;
+  state.totalTime = config.durations[mode] * 60;
+  state.timeLeft = state.totalTime;
+  state.sessionSeconds = 0;
+  $$('.mode-tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+    b.setAttribute('aria-selected', b.dataset.mode === mode);
+  });
+  updateDisplay();
+  
+  // Track mode switch
+  const today = getTodayKey();
+  if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+  stats.dailyCounters.modeSwitches = (stats.dailyCounters.modeSwitches || 0) + 1;
+  checkQuestCompletion();
+}
+function startTimer() {
+  if (state.running) return;
+  state.running = true;
+  state.lastTick = Date.now();
+  state.wasPausedThisSession = false;
+  document.body.classList.add('running');
+  $('#icon-play').style.display = 'none';
+  $('#icon-pause').style.display = 'block';
+  state.timerId = setInterval(tick, 1000);
+}
+function pauseTimer() {
+  state.running = false;
+  state.wasPausedThisSession = true;
+  document.body.classList.remove('running');
+  $('#icon-play').style.display = 'block';
+  $('#icon-pause').style.display = 'none';
+  clearInterval(state.timerId);
+}
+function resetTimer() {
+  if (state.mode === 'pomodoro' && state.sessionSeconds > 0) {
+    maybeAwardPartial(state.sessionSeconds, state.totalTime);
+  }
+  pauseTimer();
+  state.timeLeft = state.totalTime;
+  state.sessionSeconds = 0;
+  
+  // Track reset
+  const today = getTodayKey();
+  if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+  stats.dailyCounters.resets = (stats.dailyCounters.resets || 0) + 1;
+  
+  updateDisplay();
+  checkQuestCompletion();
+}
+function tick() {
+  if (state.timeLeft > 0) {
+    state.timeLeft--;
+    state.sessionSeconds++;
+    updateDisplay();
+  } else {
+    finishTimer();
+  }
+}
+function getTodayKey() {
+  return new Date().toISOString().slice(0,10);
+}
+function maybeAwardPartial(elapsedSec, totalSec) {
+  const threshold = (config.partialThreshold || 90) / 100;
+  const ratio = elapsedSec / totalSec;
+  if (ratio >= threshold && ratio < 1) {
+    awardPomodoroStats(Math.floor(elapsedSec/60) || 1);
+    showToast(`Partial session counted! (${Math.round(ratio*100)}% complete)`);
+  }
+}
+
+/* ═══════════════════════════════════════
+   STREAK SYSTEM
+   ═══════════════════════════════════════ */
+function updateStreak() {
+  const today = getTodayKey();
+  if (!stats.streak) stats.streak = { current: 0, lastActiveDate: null };
+  if (stats.streak.lastActiveDate === today) return;
+  
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yestKey = yesterday.toISOString().slice(0,10);
+  
+  if (stats.streak.lastActiveDate === yestKey) {
+    stats.streak.current++;
+  } else {
+    stats.streak.current = 1;
+  }
+  stats.streak.lastActiveDate = today;
+  persist();
+  updateStreakDisplay();
+}
+
+function getStreakMultiplier() {
+  const streak = stats.streak?.current || 0;
+  if (streak < 3) return 1.0;
+  return Math.min(1.5, 1.0 + (streak - 2) * 0.1);
+}
+
+function updateStreakDisplay() {
+  const streak = stats.streak?.current || 0;
+  $('#streak-num').textContent = streak;
+  const mult = getStreakMultiplier();
+  $('#streak-display').title = streak >= 3 ? `${streak}-day streak: ${mult.toFixed(1)}x coins` : 'Start a streak by focusing today';
+}
+
+/* ═══════════════════════════════════════
+   DAILY QUESTS
+   ═══════════════════════════════════════ */
+function generateDailyQuests() {
+  const today = getTodayKey();
+  if (stats.dailyQuests && stats.dailyQuests.date === today) return stats.dailyQuests.quests;
+  
+  // Reset daily counters for new day
+  stats.dailyCounters = {
+    date: today,
+    moodPomos: {},
+    resets: 0,
+    modeSwitches: 0,
+    drags: 0,
+    mutes: 0,
+    settingsOpens: 0,
+    shopVisits: 0,
+    noPauseCompleted: 0,
+    spentCoins: 0,
+    cycleCompleted: false
+  };
+  
+  // Shuffle and pick 10
+  const pool = [...DAILY_QUEST_TEMPLATES];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const selected = pool.slice(0, 10);
+  
+  const quests = selected.map((t, i) => {
+    const target = t.base + Math.floor(Math.random() * (t.variance + 1));
+    let desc = t.desc.replace('{target}', target);
+    if (t.type === 'mood_pomos') {
+      const mood = t.moods[Math.floor(Math.random() * t.moods.length)];
+      desc = desc.replace('{mood}', mood.charAt(0).toUpperCase() + mood.slice(1));
+      return { id: `quest_${today}_${i}`, type: t.type, name: t.name, desc, target, mood, completed: false };
+    }
+    return { id: `quest_${today}_${i}`, type: t.type, name: t.name, desc, target, completed: false };
+  });
+  
+  stats.dailyQuests = { date: today, quests, completedIds: [] };
+  persist();
+  return quests;
+}
+
+function checkQuestCompletion() {
+  if (!stats.dailyQuests) return;
+  const today = getTodayKey();
+  if (stats.dailyQuests.date !== today) return;
+  
+  const td = stats.days[today] || {};
+  const counters = stats.dailyCounters || {};
+  let newlyCompleted = false;
+  
+  stats.dailyQuests.quests.forEach(q => {
+    if (q.completed) return;
+    let progress = 0;
+    switch (q.type) {
+      case 'focus': progress = td.focusMinutes || 0; break;
+      case 'pomos': progress = td.pomodoros || 0; break;
+      case 'mood_pomos': progress = (counters.moodPomos || {})[q.mood] || 0; break;
+      case 'spend': progress = counters.spentCoins || 0; break;
+      case 'tasks': progress = td.tasksCompleted || 0; break;
+      case 'long_breaks': progress = td.longBreaks || 0; break;
+      case 'short_breaks': progress = td.shortBreaks || 0; break;
+      case 'no_pause': progress = counters.noPauseCompleted || 0; break;
+      case 'resets': progress = counters.resets || 0; break;
+      case 'modes': progress = counters.modeSwitches || 0; break;
+      case 'drags': progress = counters.drags || 0; break;
+      case 'mutes': progress = counters.mutes || 0; break;
+      case 'settings': progress = counters.settingsOpens || 0; break;
+      case 'shop': progress = counters.shopVisits || 0; break;
+      case 'cycle': progress = counters.cycleCompleted ? 1 : 0; break;
+    }
+    if (progress >= q.target) {
+      q.completed = true;
+      stats.dailyQuests.completedIds.push(q.id);
+      newlyCompleted = true;
+      // Award flat bonus
+      const bonus = 25;
+      stats.allTime.coins = Number(stats.allTime.coins) + bonus;
+      stats.allTime.totalCoinsEarned = Number(stats.allTime.totalCoinsEarned) + bonus;
+      showToast(`Quest Complete: ${q.name} +${bonus}🪙`);
+      showAchievement(q.name, '📋');
+    }
+  });
+  
+  if (newlyCompleted) {
+    updateCoinsDisplay();
+    persist();
+  }
+}
+
+function openQuests() {
+  renderQuests();
+  $('#modal-quests').classList.add('open');
+}
+
+function renderQuests() {
+  const quests = generateDailyQuests();
+  const list = $('#quest-list');
+  list.innerHTML = '';
+  
+  const today = getTodayKey();
+  const td = stats.days[today] || {};
+  const counters = stats.dailyCounters || {};
+  
+  quests.forEach(q => {
+    const div = document.createElement('div');
+    div.className = 'quest-item' + (q.completed ? ' completed' : '');
+    
+    let progress = 0;
+    switch (q.type) {
+      case 'focus': progress = td.focusMinutes || 0; break;
+      case 'pomos': progress = td.pomodoros || 0; break;
+      case 'mood_pomos': progress = (counters.moodPomos || {})[q.mood] || 0; break;
+      case 'spend': progress = counters.spentCoins || 0; break;
+      case 'tasks': progress = td.tasksCompleted || 0; break;
+      case 'long_breaks': progress = td.longBreaks || 0; break;
+      case 'short_breaks': progress = td.shortBreaks || 0; break;
+      case 'no_pause': progress = counters.noPauseCompleted || 0; break;
+      case 'resets': progress = counters.resets || 0; break;
+      case 'modes': progress = counters.modeSwitches || 0; break;
+      case 'drags': progress = counters.drags || 0; break;
+      case 'mutes': progress = counters.mutes || 0; break;
+      case 'settings': progress = counters.settingsOpens || 0; break;
+      case 'shop': progress = counters.shopVisits || 0; break;
+      case 'cycle': progress = counters.cycleCompleted ? 1 : 0; break;
+    }
+    const pct = Math.min(100, Math.round((progress / q.target) * 100));
+    
+    div.innerHTML = `
+      <div class="quest-icon">${q.completed ? '✅' : '📋'}</div>
+      <div class="quest-content">
+        <div class="quest-name">${esc(q.name)}</div>
+        <div class="quest-desc">${esc(q.desc)}</div>
+      </div>
+      <div class="quest-progress-wrap">
+        <div class="quest-progress-bar"><div class="quest-progress-fill" style="width:${pct}%"></div></div>
+        <div class="quest-progress-text">${Math.min(progress, q.target)}/${q.target}</div>
+      </div>
+      <div class="quest-reward">+25🪙</div>
+    `;
+    list.appendChild(div);
+  });
+  
+  const completedCount = stats.dailyQuests.quests.filter(q => q.completed).length;
+  $('#quest-progress').textContent = completedCount;
+}
+
+/* ═══════════════════════════════════════
+   COIN AWARDING (with streak multiplier)
+   ═══════════════════════════════════════ */
+function awardPomodoroStats(minutes) {
+  updateStreak();
+  
+  const today = getTodayKey();
+  if (!stats.days[today]) stats.days[today] = { pomodoros:0, shortBreaks:0, longBreaks:0, focusMinutes:0, tasksCompleted:0 };
+  stats.days[today].pomodoros++;
+  stats.days[today].focusMinutes += minutes;
+  stats.allTime.pomodoros++;
+  stats.allTime.focusMinutes += minutes;
+  
+  const baseCoins = 10;
+  const bonusCoins = Math.max(0, Math.floor((minutes - 25) / 5));
+  const streakMult = getStreakMultiplier();
+  const rawTotal = baseCoins + bonusCoins;
+  const totalCoins = Math.round(rawTotal * streakMult);
+  
+  stats.allTime.coins = Number(stats.allTime.coins) + totalCoins;
+  stats.allTime.totalCoinsEarned = Number(stats.allTime.totalCoinsEarned) + totalCoins;
+  
+  const active = tasks.find(t => t.active && !t.completed);
+  if (active) { active.actual = (active.actual||0) + 1; saveTasks(false); }
+  
+  // Track mood pomos
+  if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+  const mood = config.mood || 'midnight';
+  if (!stats.dailyCounters.moodPomos) stats.dailyCounters.moodPomos = {};
+  if (!stats.dailyCounters.moodPomos[mood]) stats.dailyCounters.moodPomos[mood] = 0;
+  stats.dailyCounters.moodPomos[mood]++;
+  
+  persist();
+  updateCoinsDisplay();
+  checkAchievements();
+  checkQuestCompletion();
+  
+  return totalCoins;
+}
+
+function finishTimer() {
+  pauseTimer();
+  playAlarm();
+  celebrate();
+  const today = getTodayKey();
+  if (!stats.days[today]) stats.days[today] = { pomodoros:0, shortBreaks:0, longBreaks:0, focusMinutes:0, tasksCompleted:0 };
+
+  if (state.mode === 'pomodoro') {
+    state.cycle = Math.min(state.cycle + 1, 4);
+    const mins = config.durations.pomodoro;
+    const earned = awardPomodoroStats(mins);
+    const mult = getStreakMultiplier();
+    const multText = mult > 1.0 ? ` (${mult.toFixed(1)}x streak)` : '';
+    showToast(`Pomodoro complete! +${earned}🪙${multText}`);
+    
+    if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+    if (state.cycle === 4 && !stats.dailyCounters.cycleCompleted) {
+      stats.dailyCounters.cycleCompleted = true;
+      checkQuestCompletion();
+    }
+    if (!state.wasPausedThisSession) {
+      stats.dailyCounters.noPauseCompleted = (stats.dailyCounters.noPauseCompleted || 0) + 1;
+      checkQuestCompletion();
+    }
+  } else if (state.mode === 'short') {
+    stats.days[today].shortBreaks++;
+    showToast('Short break over.');
+  } else {
+    stats.days[today].longBreaks++;
+    showToast('Long break over. Ready to focus?');
+  }
+  state.sessionSeconds = 0;
+  persist();
+  updateDisplay();
+}
+
+/* ═══════════════════════════════════════
+   AUDIO ENGINE
+   ═══════════════════════════════════════ */
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new AudioCtx();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function playAlarm() {
+  if (config.muted || config.alarm === 'none') return;
+  if (config.alarm === 'custom' && customAudioUrl) {
+    const a = new Audio(customAudioUrl);
+    a.volume = config.volume; a.play().catch(()=>{});
+    return;
+  }
+  ensureAudio();
+  const t = audioCtx.currentTime;
+  if (config.alarm === 'beep') {
+    [0,0.25,0.5].forEach((d,i)=>{
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type='square'; o.frequency.setValueAtTime(880,t+d);
+      g.gain.setValueAtTime(config.volume*0.5,t+d);
+      g.gain.exponentialRampToValueAtTime(0.001,t+d+0.12);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t+d); o.stop(t+d+0.15);
+    });
+  } else if (config.alarm === 'chime') {
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(f, t + i*0.18);
+      g.gain.setValueAtTime(config.volume*0.5, t+i*0.18);
+      g.gain.exponentialRampToValueAtTime(0.001, t+i*0.18+1.4);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t+i*0.18); o.stop(t+i*0.18+1.5);
+    });
+  } else if (config.alarm === 'bell') {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(550,t);
+    o.frequency.exponentialRampToValueAtTime(420,t+0.6);
+    g.gain.setValueAtTime(config.volume,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+1.8);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t+2);
+  } else if (config.alarm === 'digital') {
+    for (let i=0;i<<6;i++) {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type='sawtooth'; o.frequency.setValueAtTime(1400,t+i*0.1);
+      g.gain.setValueAtTime(config.volume*0.25,t+i*0.1);
+      g.gain.exponentialRampToValueAtTime(0.001,t+i*0.1+0.08);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t+i*0.1); o.stop(t+i*0.1+0.1);
+    }
+  }
+}
+function testSound() { playAlarm(); }
+
+/* ═══════════════════════════════════════
+   TASKS
+   ═══════════════════════════════════════ */
+function saveTasks(write=true) {
+  if (write) persist();
+  renderTasks();
+  updateActiveTaskDisplay();
+}
+function renderTasks() {
+  const list = $('#task-list');
+  if (tasks.length === 0) {
+    list.innerHTML = '<li style="text-align:center;color:#475569;padding:28px 0;font-size:0.9rem;">No tasks yet. Add one above!</li>';
+    return;
+  }
+  list.innerHTML = '';
+  tasks.forEach((task, idx) => {
+    const li = document.createElement('li');
+    li.className = 'task-item' + (task.active ? ' active-task' : '') + (task.completed ? ' completed' : '');
+    li.innerHTML = `
+      <input type="checkbox" ${task.completed?'checked':''} onchange="toggleTask(${idx})" aria-label="Toggle task completion">
+      <span class="task-text">${esc(task.text)}</span>
+      <span class="task-pomos">${task.actual||0}/${task.estimated} 🍅</span>
+      <button class="task-active-btn ${task.active?'on':''}" onclick="setActiveTask(${idx})">${task.active?'ACTIVE':'SET'}</button>
+      <button class="task-del" onclick="deleteTask(${idx})" aria-label="Delete task">&times;</button>
+    `;
+    list.appendChild(li);
+  });
+}
+function addTask() {
+  const text = $('#task-input').value.trim();
+  const est = parseInt($('#task-est').value)||1;
+  if (!text) return;
+  tasks.push({ id: Date.now(), text, estimated: est, actual: 0, completed: false, active: tasks.filter(t=>!t.completed).length===0 });
+  $('#task-input').value=''; $('#task-est').value=1;
+  saveTasks();
+}
+function toggleTask(idx) {
+  tasks[idx].completed = !tasks[idx].completed;
+  if (tasks[idx].completed && tasks[idx].active) {
+    tasks[idx].active = false;
+    const next = tasks.find((t,i) => !t.completed && i!==idx);
+    if (next) next.active = true;
+  }
+  if (tasks[idx].completed) {
+    const today = getTodayKey();
+    if (!stats.days[today]) stats.days[today] = { pomodoros:0, shortBreaks:0, longBreaks:0, focusMinutes:0, tasksCompleted:0 };
+    stats.days[today].tasksCompleted = (stats.days[today].tasksCompleted || 0) + 1;
+    checkQuestCompletion();
+  }
+  saveTasks();
+}
+function setActiveTask(idx) {
+  tasks.forEach((t,i)=> t.active = i===idx && !t.completed);
+  saveTasks();
+}
+function deleteTask(idx) {
+  tasks.splice(idx,1); saveTasks();
+}
+function esc(t) {
+  const d=document.createElement('div'); d.textContent=t; return d.innerHTML;
+}
+
+/* ═══════════════════════════════════════
+   STATISTICS
+   ═══════════════════════════════════════ */
+function renderStats() {
+  const today = getTodayKey();
+  const td = stats.days[today] || { pomodoros:0, focusMinutes:0 };
+  animateNum('st-today-pomo', td.pomodoros);
+  animateNum('st-today-focus', td.focusMinutes);
+  animateNum('st-total-pomo', stats.allTime.pomodoros);
+  animateNum('st-total-focus', +(stats.allTime.focusMinutes/60).toFixed(1), true);
+  animateNum('st-total-coins', stats.allTime.totalCoinsEarned);
+  animateNum('st-current-coins', stats.allTime.coins);
+  animateNum('st-streak', stats.streak?.current || 0);
+  $('#st-multiplier').textContent = getStreakMultiplier().toFixed(1) + 'x';
+  drawChart();
+    renderContributionGraph();
+}
+function animateNum(id, target, isFloat=false) {
+  const el = document.getElementById(id);
+  const start = parseFloat(el.textContent)||0;
+  const dur = 600; const t0 = performance.now();
+  function step(now) {
+    const p = Math.min((now-t0)/dur, 1);
+    const ease = 1 - Math.pow(1-p, 3);
+    const val = start + (target-start)*ease;
+    el.textContent = isFloat ? val.toFixed(1) : Math.round(val);
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+function drawChart() {
+  const canvas = $('#stats-chart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0,0,w,h);
+
+  const days = [];
+  for (let i=6; i>=0; i--) { const d=new Date(); d.setDate(d.getDate()-i); days.push(d.toISOString().slice(0,10)); }
+  const vals = days.map(d => (stats.days[d]?.pomodoros || 0));
+  const max = Math.max(...vals, 1);
+  const barW = (w-48)/7, gap = 6;
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i=0;i<=4;i++) {
+    const y = h - 28 - (i/4)*(h-48);
+    ctx.beginPath(); ctx.moveTo(24,y); ctx.lineTo(w-24,y); ctx.stroke();
+  }
+
+  days.forEach((day, i) => {
+    const v = vals[i];
+    const bh = (v/max)*(h-52);
+    const x = 24 + i*barW + gap/2;
+    const y = h - 28 - bh;
+    const grad = ctx.createLinearGradient(0, y+bh, 0, y);
+    grad.addColorStop(0, config.colors.primary+'40');
+    grad.addColorStop(1, config.colors.primary);
+    ctx.fillStyle = v>0 ? grad : 'rgba(255,255,255,0.04)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, barW-gap, bh, [4,4,0,0]);
+    ctx.fill();
+    ctx.fillStyle = '#475569';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    const label = new Date(day).toLocaleDateString(undefined, {weekday:'narrow'});
+    ctx.fillText(label, x+(barW-gap)/2, h-10);
+    if (v>0) {
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillText(String(v), x+(barW-gap)/2, y-6);
+    }
+  });
+}
+
+/* ═══════════════════════════════════════
+   COINS & SHOP (Rewards Only)
+   ═══════════════════════════════════════ */
+function updateCoinsDisplay() {
+  const coins = Number(stats.allTime.coins) || 0;
+  $('#coins-num').textContent = coins;
+}
+function getPrice(item) {
+  const count = stats.shopPurchases[item.id] || 0;
+  return Math.floor(item.basePrice * Math.pow(item.scaling, count));
+}
+function openShop() {
+  renderShop();
+  $('#modal-shop').classList.add('open');
+  
+  const today = getTodayKey();
+  if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+  stats.dailyCounters.shopVisits = (stats.dailyCounters.shopVisits || 0) + 1;
+  checkQuestCompletion();
+}
+function renderShop() {
+  $('#shop-coins').textContent = Number(stats.allTime.coins) || 0;
+  const items = getAllShopItems();
+  const grid = $('#shop-rewards');
+  grid.innerHTML = '';
+  items.forEach(item => {
+    const price = getPrice(item);
+    const div = document.createElement('div');
+    div.className = 'shop-item';
+    div.innerHTML = `
+      <div class="shop-icon">${item.icon}</div>
+      <div class="shop-name">${esc(item.name)}</div>
+      <div class="shop-price">${price} 🪙</div>
+      <div class="shop-scaling">Next: ${Math.floor(item.basePrice * Math.pow(item.scaling, (stats.shopPurchases[item.id]||0)+1))} 🪙</div>
+    `;
+    div.onclick = () => buyItem(item);
+    grid.appendChild(div);
+  });
+  updateRedeemDisplay();
+  checkRedemptionStatus();
+}
+function buyItem(item) {
+  const price = getPrice(item);
+  const currentCoins = Number(stats.allTime.coins) || 0;
+  if (currentCoins < price) {
+    showToast('Not enough coins!'); return;
+  }
+  stats.allTime.coins = currentCoins - price;
+  stats.shopPurchases[item.id] = (stats.shopPurchases[item.id] || 0) + 1;
+  stats.allTime.redeemableMinutes = (stats.allTime.redeemableMinutes || 0) + (item.data?.minutes || 0);
+  
+  // Track spending
+  const today = getTodayKey();
+  if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+  stats.dailyCounters.spentCoins = (stats.dailyCounters.spentCoins || 0) + price;
+  
+  persist();
+  updateCoinsDisplay();
+  renderShop();
+  showToast(`Purchased ${item.name}! You earned ${item.data?.minutes || '?'} min screen time.`);
+  checkQuestCompletion();
+}
+function addCustomReward() {
+  const name = $('#in-custom-reward-name').value.trim();
+  const price = parseInt($('#in-custom-reward-price').value) || 50;
+  const scale = parseFloat($('#in-custom-reward-scale').value) || 1.5;
+  const mins = parseInt($('#in-custom-reward-minutes').value) || 10;
+  if (!name) { showToast('Enter a reward name'); return; }
+  const id = 'custom_' + Date.now();
+  stats.customShopItems.push({ id, name, type:'reward', basePrice:price, scaling:scale, icon:'🎁', data:{minutes:mins} });
+  persist();
+  showToast('Custom reward added!');
+  $('#in-custom-reward-name').value = '';
+}
+
+/* ═══════════════════════════════════════
+   SCREEN TIME REDEMPTION
+   ═══════════════════════════════════════ */
+let redeemInterval = null;
+
+function updateRedeemDisplay() {
+  const mins = Number(stats.allTime.redeemableMinutes) || 0;
+  $('#redeem-minutes-display').textContent = mins + ' min available';
+}
+
+async function checkRedemptionStatus() {
+  try {
+    const res = await fetch('/api/redeem/status');
+    const data = await res.json();
+    if (data.active) {
+      $('#redeem-active-section').style.display = 'block';
+      $('#redeem-inactive-section').style.display = 'none';
+      const total = data.secondsRemaining;
+      const m = Math.floor(total / 60);
+      const s = total % 60;
+      $('#redeem-countdown').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      if (total <= 0) {
+        clearInterval(redeemInterval);
+        showToast('Screen time expired');
+        checkRedemptionStatus();
+      }
+    } else {
+      $('#redeem-active-section').style.display = 'none';
+      $('#redeem-inactive-section').style.display = 'block';
+      if (redeemInterval) { clearInterval(redeemInterval); redeemInterval = null; }
+    }
+    updateRedeemDisplay();
+  } catch(e) {}
+}
+
+async function startRedemption(minutes) {
+  const mins = Number(stats.allTime.redeemableMinutes) || 0;
+  if (mins < minutes) {
+    showToast(`Not enough redeemable minutes (${mins} available)`);
+    return;
+  }
+  try {
+    const res = await fetch('/api/redeem/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ minutes })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error); return; }
+    // Update local stats
+    stats.allTime.redeemableMinutes = (stats.allTime.redeemableMinutes || 0) - minutes;
+    stats.currentRedemption = { active: true, startedAt: new Date().toISOString(), minutes };
+    showToast(`Redeemed ${minutes} min screen time!`);
+    checkRedemptionStatus();
+    if (redeemInterval) clearInterval(redeemInterval);
+    redeemInterval = setInterval(checkRedemptionStatus, 1000);
+  } catch(e) { showToast('Failed to start redemption'); }
+}
+
+async function stopRedemption() {
+  try {
+    const res = await fetch('/api/redeem/stop', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) { showToast(data.error); return; }
+    stats.allTime.redeemableMinutes = (stats.allTime.redeemableMinutes || 0) + (data.refunded || 0);
+    stats.currentRedemption = { active: false };
+    if (redeemInterval) { clearInterval(redeemInterval); redeemInterval = null; }
+    showToast(`Screen time stopped. ${Math.round(data.refunded)} min refunded.`);
+    checkRedemptionStatus();
+  } catch(e) { showToast('Failed to stop redemption'); }
+}
+
+/* ═══════════════════════════════════════
+   UNLOCKABLES (Time-based: badges, titles, colors)
+   ═══════════════════════════════════════ */
+function openUnlockables() {
+  renderUnlockables();
+  $('#modal-unlockables').classList.add('open');
+}
+function renderUnlockables() {
+    const totalMins = Number(stats.allTime.focusMinutes) || 0;
+    $('#unlock-focus-time').textContent = totalMins + ' min (' + (totalMins/60).toFixed(1) + ' hrs)';
+    const grid = $('#unlock-grid');
+    grid.innerHTML = '';
+    TIME_UNLOCKABLES.forEach(u => {
+        const unlocked = totalMins >= u.minutes;
+        const alreadyUnlocked = stats.unlockedTimeItems.includes(u.id);
+        const isEquipped = (u.type === 'title' && stats.equippedTitle === u.data?.title) ||
+                           (u.type === 'color' && stats.equippedColor === u.data?.color) ||
+                           (u.type === 'glow' && stats.equippedGlow === u.data?.glow);
+        const div = document.createElement('div');
+        div.className = 'unlock-item' + (unlocked ? ' unlocked' : ' locked') + (isEquipped ? ' equipped' : '');
+        let preview = '';
+        if (u.type === 'color' && u.data?.color) {
+            preview = `<div class="unlock-preview" style="width:18px;height:18px;border-radius:50%;background:${u.data.color};box-shadow:0 0 8px ${u.data.color};"></div>`;
+        } else if (u.type === 'glow' && u.data?.glow) {
+            preview = `<div class="unlock-preview" style="width:22px;height:22px;border-radius:4px;background:rgba(255,255,255,0.05);box-shadow:${u.data.glow};"></div>`;
+        } else if (u.type === 'title') {
+            preview = `<div class="unlock-preview" style="font-size:0.55rem;color:var(--text-dim);letter-spacing:0.5px;">TITLE</div>`;
+        }
+        div.innerHTML = `
+            <div class="unlock-icon">${u.icon}</div>
+            ${preview}
+            <div class="unlock-name">${esc(u.name)}</div>
+            <div class="unlock-req">${u.minutes}m</div>
+            ${isEquipped ? '<div style="font-size:0.6rem;color:var(--primary);margin-top:2px;font-weight:700;">EQUIPPED</div>' : ''}
+        `;
+        if (unlocked && !alreadyUnlocked) {
+            stats.unlockedTimeItems.push(u.id);
+            persist();
+            showAchievement(u.name, u.icon);
+        }
+        if (unlocked && (u.type === 'title' || u.type === 'color' || u.type === 'glow')) {
+            div.style.cursor = 'pointer';
+            div.title = isEquipped ? 'Click to unequip' : 'Click to equip';
+            div.onclick = () => equipUnlockable(u);
+        }
+        grid.appendChild(div);
+    });
+}
+function equipUnlockable(u) {
+    if (u.type === 'title') {
+        if (stats.equippedTitle === u.data?.title) {
+            stats.equippedTitle = null;
+            $('#title-display').textContent = '';
+            showToast('Title unequipped');
+        } else {
+            stats.equippedTitle = u.data?.title || u.name;
+            $('#title-display').textContent = stats.equippedTitle;
+            showToast(`Title equipped: ${stats.equippedTitle}`);
+        }
+    } else if (u.type === 'color') {
+        if (stats.equippedColor === u.data?.color) {
+            stats.equippedColor = null;
+            document.documentElement.style.removeProperty('--text-main');
+            showToast('Color unequipped');
+        } else {
+            stats.equippedColor = u.data?.color;
+            document.documentElement.style.setProperty('--text-main', u.data.color);
+            showToast(`Color equipped: ${u.name}`);
+        }
+    } else if (u.type === 'glow') {
+        if (stats.equippedGlow === u.data?.glow) {
+            stats.equippedGlow = null;
+            showToast('Glow unequipped');
+        } else {
+            stats.equippedGlow = u.data?.glow;
+            showToast(`Glow equipped: ${u.name}`);
+        }
+    }
+    applyEquipped();
+    persist();
+    renderUnlockables();
+}
+function checkAchievements() {
+  const totalMins = Number(stats.allTime.focusMinutes) || 0;
+  let newlyUnlocked = false;
+  TIME_UNLOCKABLES.forEach(u => {
+    if (totalMins >= u.minutes && !stats.unlockedTimeItems.includes(u.id)) {
+      stats.unlockedTimeItems.push(u.id);
+      newlyUnlocked = true;
+      showAchievement(u.name, u.icon);
+    }
+  });
+  if (newlyUnlocked) persist();
+}
+function showAchievement(name, icon) {
+  const popup = $('#achievement-popup');
+  $('#ach-icon').textContent = icon;
+  $('#ach-name').textContent = name;
+  popup.classList.add('show');
+  setTimeout(() => popup.classList.remove('show'), 3500);
+}
+
+/* ═══════════════════════════════════════
+   AUTO EXPORT / IMPORT
+   ═══════════════════════════════════════ */
+async function chooseSyncFolder() {
+  if (!window.showDirectoryPicker) {
+    showToast('File System Access API not supported');
+    return;
+  }
+  try {
+    const handle = await showDirectoryPicker();
+    syncFolderHandle = handle;
+    await idbPut('meta', 'syncFolder', handle);
+    $('#sync-folder-hint').textContent = 'Folder: ' + handle.name;
+    showToast('Sync folder selected');
+  } catch(e) { showToast('Folder selection cancelled'); }
+}
+async function autoExport() {
+  const mode = config.autoExport || 'off';
+  if (mode === 'off') return;
+  const data = JSON.stringify({ config, tasks, stats }, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  if (mode === 'download') {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `epidoro-backup-${getTodayKey()}.json`; a.click();
+    URL.revokeObjectURL(url);
+  } else if (mode === 'folder' && syncFolderHandle) {
+    try {
+      const fileHandle = await syncFolderHandle.getFileHandle('epidoro-stats.json', {create:true});
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } catch(e) { console.error('Auto-export failed', e); }
+  }
+}
+function manualExport() {
+  const data = JSON.stringify({ config, tasks, stats, exportedAt: new Date().toISOString() }, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `epidoro-stats-${getTodayKey()}.json`; a.click();
+  URL.revokeObjectURL(url);
+  showToast('Stats exported');
+}
+function manualImport(input) {
+  const file = input.files[0]; if (!file) return;
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const d = JSON.parse(e.target.result);
+      if (d.stats) stats = d.stats;
+      if (d.tasks) tasks = d.tasks;
+      if (d.config) config = { ...defaultConfig, ...d.config };
+      // Re-initialize robustly
+      stats.allTime.coins = Number(stats.allTime.coins) || 0;
+      stats.allTime.totalCoinsEarned = Number(stats.allTime.totalCoinsEarned) || stats.allTime.coins;
+      if (!stats.shopPurchases) stats.shopPurchases = {};
+      if (!stats.unlockedTimeItems) stats.unlockedTimeItems = [];
+      if (!stats.customShopItems) stats.customShopItems = [];
+      if (!stats.streak) stats.streak = { current: 0, lastActiveDate: null };
+      if (!stats.dailyQuests) stats.dailyQuests = null;
+      if (!stats.dailyCounters) stats.dailyCounters = null;
+      persist();
+      applyConfig();
+      renderTasks();
+      updateDisplay();
+      updateCoinsDisplay();
+      updateStreakDisplay();
+      showToast('Data imported successfully');
+    } catch(err) { showToast('Invalid import file'); }
+    input.value='';
+  };
+  r.readAsText(file);
+}
+function exportStats() { manualExport(); }
+function importStats(input) { manualImport(input); }
+
+window.addEventListener('pagehide', autoExport);
+window.addEventListener('beforeunload', autoExport);
+
+/* ═══════════════════════════════════════
+   CELEBRATION
+   ═══════════════════════════════════════ */
+function celebrate() {
+  const rect = card.getBoundingClientRect();
+  const cx = rect.left + rect.width/2;
+  const cy = rect.top + rect.height/2;
+  const colors = [config.colors.primary, '#fbbf24', '#ef4444', '#3b82f6', '#ffffff'];
+  for (let i=0; i < 36; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    const size = 4 + Math.random()*6;
+    const color = colors[Math.floor(Math.random()*colors.length)];
+    p.style.cssText = `left:${cx}px;top:${cy}px;width:${size}px;height:${size}px;background:${color};`;
+    document.body.appendChild(p);
+    const angle = Math.random()*Math.PI*2;
+    const dist = 60 + Math.random()*140;
+    const tx = Math.cos(angle)*dist;
+    const ty = Math.sin(angle)*dist + Math.random()*40;
+    p.animate([
+      { transform: 'translate(0,0) scale(1)', opacity: 1 },
+      { transform: `translate(${tx}px, ${ty}px) scale(0)`, opacity: 0 }
+    ], { duration: 700 + Math.random()*400, easing: 'cubic-bezier(0.25, 1, 0.5, 1)', fill: 'forwards' });
+    setTimeout(() => p.remove(), 1200);
+  }
+}
+
+/* ═══════════════════════════════════════
+   MODALS
+   ═══════════════════════════════════════ */
+function openSettings() {
+  $('#in-pomo').value = config.durations.pomodoro;
+  $('#in-short').value = config.durations.short;
+  $('#in-long').value = config.durations.long;
+  $('#in-primary').value = config.colors.primary;
+  $('#in-bg').value = config.colors.bg;
+  $('#in-font-timer').value = config.fontTimer;
+  $('#in-fox').value = config.fox;
+  $('#in-alarm').value = config.alarm;
+  $('#in-vol').value = config.volume;
+  $('#in-bgtype').value = config.bgType || 'aurora';
+  $('#in-mood').value = config.mood || 'midnight';
+  $('#in-videofit').value = config.videoFit || 'cover';
+  $('#in-videoopa').value = config.videoOpacity || 0.35;
+  $('#in-threshold').value = config.partialThreshold || 90;
+  $('#threshold-hint').textContent = `Sessions completed above ${config.partialThreshold || 90}% count toward stats`;
+  $('#in-autoexport').value = config.autoExport || 'off';
+  toggleBgType(); toggleCustomAudio(); toggleAutoExport();
+  
+  // Track settings open
+  const today = getTodayKey();
+  if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+  stats.dailyCounters.settingsOpens = (stats.dailyCounters.settingsOpens || 0) + 1;
+  checkQuestCompletion();
+  
+  $('#modal-settings').classList.add('open');
+}
+function openTasks() { renderTasks(); $('#modal-tasks').classList.add('open'); }
+function openStats() { renderStats(); $('#modal-stats').classList.add('open'); }
+function closeModals() { $$('.modal-overlay').forEach(m => m.classList.remove('open')); }
+
+/* ═══════════════════════════════════════
+   SETTINGS LOGIC
+   ═══════════════════════════════════════ */
+function saveSettings() {
+  config.durations.pomodoro = parseInt($('#in-pomo').value)||25;
+  config.durations.short = parseInt($('#in-short').value)||5;
+  config.durations.long = parseInt($('#in-long').value)||15;
+  config.colors.primary = $('#in-primary').value;
+  config.colors.bg = $('#in-bg').value;
+  config.fontTimer = $('#in-font-timer').value;
+  config.fox = $('#in-fox').value || '🦊';
+  config.alarm = $('#in-alarm').value;
+  config.volume = parseFloat($('#in-vol').value);
+  config.bgType = $('#in-bgtype').value;
+  config.mood = $('#in-mood').value;
+  config.videoFit = $('#in-videofit').value;
+  config.videoOpacity = parseFloat($('#in-videoopa').value);
+  config.partialThreshold = parseInt($('#in-threshold').value) || 90;
+  config.autoExport = $('#in-autoexport').value;
+
+  const vFile = $('#in-video').files[0];
+  if (vFile && config.bgType === 'video') {
+    const url = URL.createObjectURL(vFile);
+    $('#bg-video').src = url;
+    $('#bg-video').play().catch(()=>{});
+  }
+  if (config.bgType !== 'video') { $('#bg-video').pause(); $('#bg-video').src=''; }
+
+  const aFile = $('#in-custom-audio').files[0];
+  if (aFile && config.alarm === 'custom') {
+    customAudioBlob = aFile; customAudioUrl = URL.createObjectURL(aFile);
+    idbPut('blobs', 'alarm', aFile);
+  }
+
+  persist();
+  applyConfig();
+  if (!state.running) {
+    state.totalTime = config.durations[state.mode]*60;
+    state.timeLeft = state.totalTime;
+    updateDisplay();
+  }
+  closeModals();
+  showToast('Settings saved');
+}
+function applyConfig() {
+  const r = document.documentElement.style;
+  r.setProperty('--primary', config.colors.primary);
+  r.setProperty('--primary-dark', darken(config.colors.primary, 20));
+  r.setProperty('--bg-color', config.colors.bg);
+  r.setProperty('--font-timer', config.fontTimer);
+  r.setProperty('--video-fit', config.videoFit || 'cover');
+  r.setProperty('--video-opacity', config.videoOpacity || 0.35);
+  document.body.setAttribute('data-bg', config.bgType || 'aurora');
+  document.body.setAttribute('data-mood', config.mood || 'midnight');
+  $('#fox-icon').textContent = config.fox;
+
+  const timer = config.fontTimer.replace(/ /g,'+');
+  const main = 'Inter'.replace(/ /g,'+');
+  $('#gf').href = `https://fonts.googleapis.com/css2?family=${main}:wght@300;400;500;600;700;800&family=${timer}&display=swap`;
+
+  if (stats.equippedColor) {
+    r.setProperty('--text-main', stats.equippedColor);
+  }
+}
+function darken(hex, amt) {
+  let usePound = false;
+  if (hex[0]==='#') { hex=hex.slice(1); usePound=true; }
+  let num = parseInt(hex,16);
+  let r=(num>>16)+amt, g=((num>>8)&0x00FF)+amt, b=(num&0x0000FF)+amt;
+  r=r>255?255:r<<0?0:r; g=g>255?255:g<<0?0:g; b=b>255?255:b<<0?0:b;
+  return (usePound?'#':'')+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0');
+}
+function toggleBgType() {
+  const t = $('#in-bgtype').value;
+  $('#wrap-mood').style.display = t==='aurora' ? 'block' : 'none';
+  $('#wrap-video').style.display = t==='video' ? 'block' : 'none';
+  $('#wrap-videofit').style.display = t==='video' ? 'block' : 'none';
+  $('#wrap-videoopa').style.display = t==='video' ? 'block' : 'none';
+  $('#wrap-solid').style.display = t==='solid' ? 'block' : 'none';
+}
+function toggleCustomAudio() {
+  $('#wrap-custom-audio').style.display = $('#in-alarm').value==='custom' ? 'block' : 'none';
+}
+function toggleAutoExport() {
+  const t = $('#in-autoexport').value;
+  $('#wrap-syncfolder').style.display = t==='folder' ? 'block' : 'none';
+}
+$('#in-bgtype').addEventListener('change', toggleBgType);
+$('#in-alarm').addEventListener('change', toggleCustomAudio);
+$('#in-autoexport').addEventListener('change', toggleAutoExport);
+$('#in-threshold').addEventListener('input', e => {
+  $('#threshold-hint').textContent = `Sessions completed above ${e.target.value}% count toward stats`;
+});
+
+/* ═══════════════════════════════════════
+   TABS
+   ═══════════════════════════════════════ */
+$$('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const parent = btn.closest('.modal');
+    parent.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+    btn.classList.add('active'); btn.setAttribute('aria-selected','true');
+    parent.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    const panel = parent.querySelector('#tab-'+btn.dataset.tab);
+    if (panel) panel.classList.add('active');
+  });
+});
+
+/* ═══════════════════════════════════════
+   UTILS
+   ═══════════════════════════════════════ */
+function showToast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+  else document.exitFullscreen();
+}
+
+/* ═══════════════════════════════════════
+   EVENT BINDINGS
+   ═══════════════════════════════════════ */
+$('#btn-play').addEventListener('click', () => state.running ? pauseTimer() : startTimer());
+$('#btn-reset').addEventListener('click', resetTimer);
+$('#btn-mute').addEventListener('click', () => {
+  config.muted = !config.muted;
+  $('#btn-mute').classList.toggle('muted', config.muted);
+  $('#icon-sound').style.display = config.muted ? 'none' : 'block';
+  $('#icon-mute').style.display = config.muted ? 'block' : 'none';
+  persist();
+  
+  // Track mute toggle
+  const today = getTodayKey();
+  if (!stats.dailyCounters || stats.dailyCounters.date !== today) generateDailyQuests();
+  stats.dailyCounters.mutes = (stats.dailyCounters.mutes || 0) + 1;
+  checkQuestCompletion();
+});
+$('#btn-settings').addEventListener('click', openSettings);
+$('#btn-test-sound').addEventListener('click', testSound);
+$$('.mode-tabs button').forEach(b => b.addEventListener('click', () => switchMode(b.dataset.mode)));
+$('#task-input').addEventListener('keydown', e => { if (e.key==='Enter') addTask(); });
+
+$$('.modal-overlay').forEach(o => o.addEventListener('click', e => { if (e.target===o) closeModals(); }));
+
+/* ═══════════════════════════════════════
+   KEYBOARD
+   ═══════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  if (e.code==='Space' && document.activeElement?.tagName!=='INPUT' && document.activeElement?.tagName!=='TEXTAREA') {
+    e.preventDefault(); state.running ? pauseTimer() : startTimer();
+  }
+  if (e.code==='KeyR' && document.activeElement?.tagName!=='INPUT' && document.activeElement?.tagName!=='TEXTAREA') {
+    resetTimer();
+  }
+  if (e.code==='Escape') closeModals();
+});
+
+/* ═══════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════ */
+async function initFromServer() {
+    let data = null;
+    try {
+        const res = await fetch('/api/stats');
+        if (res.ok) data = await res.json();
+    } catch (e) { console.log('Server unreachable'); }
+    if (!data) {
+        try {
+            const backup = localStorage.getItem('epidoro_backup');
+            if (backup) data = JSON.parse(backup);
+        } catch(e){}
+    }
+    if (data) {
+        if (data.stats) stats = data.stats;
+        if (data.tasks) tasks = data.tasks;
+        if (data.config) config = { ...defaultConfig, ...data.config };
+    }
+    stats.allTime.coins = Number(stats.allTime.coins) || 0;
+    stats.allTime.totalCoinsEarned = Number(stats.allTime.totalCoinsEarned) || stats.allTime.coins;
+    if (!stats.shopPurchases) stats.shopPurchases = {};
+    if (!stats.equippedTitle) stats.equippedTitle = null;
+    if (!stats.equippedColor) stats.equippedColor = null;
+    if (!stats.equippedGlow) stats.equippedGlow = null;
+    if (!stats.unlockedTimeItems) stats.unlockedTimeItems = [];
+    if (!stats.customShopItems) stats.customShopItems = [];
+    if (!stats.streak) stats.streak = { current: 0, lastActiveDate: null };
+    if (!stats.dailyQuests) stats.dailyQuests = null;
+    if (!stats.dailyCounters) stats.dailyCounters = null;
+    if (!stats.allTime.redeemableMinutes) stats.allTime.redeemableMinutes = 0;
+    if (!stats.currentRedemption || !stats.currentRedemption.active) stats.currentRedemption = { active: false };
+}
+
+function applyEquipped() {
+    if (stats.equippedTitle) $('#title-display').textContent = stats.equippedTitle;
+    if (stats.equippedColor) document.documentElement.style.setProperty('--text-main', stats.equippedColor);
+    if (stats.equippedGlow) {
+        card.style.setProperty('box-shadow', stats.equippedGlow + ', 0 8px 32px var(--shadow)');
+        card.style.setProperty('border-color', 'rgba(255,255,255,0.25)');
+    }
+}
+
+function renderContributionGraph() {
+    const container = $('#contrib-graph');
+    if (!container) return;
+    container.innerHTML = '';
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(start.getDate() - 364);
+    while (start.getDay() !== 0) start.setDate(start.getDate() - 1);
+    const end = new Date(today);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const key = d.toISOString().slice(0,10);
+        const dayData = stats.days?.[key];
+        const pomos = dayData?.pomodoros || 0;
+        const cell = document.createElement('div');
+        cell.className = 'contrib-cell';
+        if (pomos >= 8) cell.classList.add('l4');
+        else if (pomos >= 5) cell.classList.add('l3');
+        else if (pomos >= 3) cell.classList.add('l2');
+        else if (pomos >= 1) cell.classList.add('l1');
+        const dateStr = d.toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
+        cell.title = `${dateStr} — ${pomos} 🍅 · ${dayData?.focusMinutes || 0}m focus`;
+        container.appendChild(cell);
+    }
+}
+
+async function initApp() {
+    await initFromServer();
+    applyConfig();
+    applyEquipped();
+    updateDisplay();
+    renderTasks();
+    updateActiveTaskDisplay();
+    updateCoinsDisplay();
+    updateStreakDisplay();
+    generateDailyQuests();
+    if (stats.equippedTitle) $('#title-display').textContent = stats.equippedTitle;
+    if (config.muted) {
+        $('#btn-mute').classList.add('muted');
+        $('#icon-sound').style.display='none';
+        $('#icon-mute').style.display='block';
+    }
+    checkAchievements();
+    updateSyncIndicator();
+    // Check for active screen time redemption
+    checkRedemptionStatus().then(() => {
+      const redemption = stats.currentRedemption;
+      if (redemption?.active) {
+        if (redeemInterval) clearInterval(redeemInterval);
+        redeemInterval = setInterval(checkRedemptionStatus, 1000);
+      }
+    });
+    const loader = document.getElementById('loader');
+    if (loader) { loader.classList.add('fade'); setTimeout(() => loader.remove(), 500); }
+}
+
+initApp();
+
+/* ─── Service Worker (PWA install + offline) ─── */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+</script>
+</body>
+</html>

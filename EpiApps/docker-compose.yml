@@ -1,0 +1,59 @@
+services:
+  epidoro:
+    image: python:3.11-slim
+    container_name: epidoro
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./epidoro/app.py:/app/app.py:ro
+      - ./epidoro/templates:/app/templates:ro
+    networks:
+      - shared
+      - default
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir flask && python app.py"
+    restart: unless-stopped
+
+  epiproducitv:
+    image: python:3.11-slim
+    container_name: epiproducitv
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./data:/app/data
+      - ./epiproducitv/app.py:/app/app.py:ro
+      - ./epiproducitv/templates:/app/templates:ro
+    networks:
+      - shared
+      - default
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir flask && python app.py"
+    restart: unless-stopped
+    depends_on:
+      - epidoro
+
+  epimix:
+    image: python:3.11-slim
+    container_name: epimix
+    ports:
+      - "5002:5002"
+    volumes:
+      - ./data:/app/data
+      - ./epimix/app.py:/app/app.py:ro
+      - ./epimix/templates:/app/templates:ro
+    networks:
+      - shared
+      - default
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir flask && python app.py"
+    restart: unless-stopped
+    depends_on:
+      - epidoro
+networks:
+  shared:
+    external: true
+    name: cloudflaretun

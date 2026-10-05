@@ -1,0 +1,70 @@
+epimix (/epimix/app.py)
+Method	Path	Purpose
+GET	/	Render page
+GET	/api/data	Get combined stats + tasks
+GET	/api/stats	Get stats only
+POST	/api/stats	Save stats
+POST	/api/tasks	Create task
+POST	/api/tasks/<id>/toggle	Toggle task completion
+DELETE	/api/tasks/<id>	Delete task
+POST	/api/tasks/reorder	Reorder tasks
+POST	/api/config	Save config
+GET	/api/redeem/status	Get redemption/free-day status
+POST	/api/redeem/start	Start screen-time redemption
+POST	/api/redeem/stop	Stop redemption
+GET	/api/export	Export all data
+POST	/api/import	Import data
+GET	/manifest.json	PWA manifest
+GET	/icon.svg	App icon
+GET	/sw.js	Service worker
+epiproducitv (/epiproducitv/app.py)
+Method	Path	Purpose
+GET	/	Render page
+GET	/api/data	Get combined stats + tasks (incl. todayCompletions/completionsLimit per task, productivityStreak)
+POST	/api/tasks	Create task (repeat accepts none|daily|interval_N, float/int, string)
+POST	/api/tasks/<id>/toggle	Toggle task completion (multi-completion per day; 2nd toggle unchecks)
+POST	/api/tasks/<task_id>	Edit task (text/difficulty/category/repeat)
+DELETE	/api/tasks/<id>	Delete task (removes from timeblocks, keeps in deletedTasks for undo)
+GET	/api/tasks/deleted	List soft-deleted tasks (for undo)
+POST	/api/tasks/<id>/restore	Restore a soft-deleted task
+POST	/api/tasks/clear-completed	Remove completed one-time tasks (skips active repeats)
+POST	/api/tasks/reorder	Reorder tasks
+POST	/api/categories	Create category
+POST	/api/categories/<id>	Rename category
+PUT	/api/categories/<id>	Rename category
+DELETE	/api/categories/<id>	Delete category (last category is protected, 400)
+POST	/api/focus/session	Report a completed focus session (minutes) -> focusMinutes/pomodoros/coins
+POST	/api/config	Save config (validated)
+GET	/api/export	Export all data
+POST	/api/import	Import data (validated + normalized)
+GET	/api/timeblocks	Get timeblocks
+POST	/api/timeblocks/save	Save timeblocks (validated)
+POST	/api/timeblocks/preset/save	Save block preset
+POST	/api/timeblocks/preset/<id>/load	Load block preset
+DELETE	/api/timeblocks/preset/<id>	Delete block preset
+GET	/api/calendar/config	Get CalDAV config
+POST	/api/calendar/config	Save CalDAV config
+POST	/api/calendar/test	Test CalDAV connection
+POST	/api/calendar/sync	Sync a block to CalDAV (scheduledDate, recurrence -> RRULE; requires CalDAV config)
+POST	/api/calendar/event/delete	Remove block's CalDAV event (accepts {url, blockId})
+GET	/api/redeem/status	Get redemption/free-day status
+POST	/api/redeem/start	Start screen-time redemption
+POST	/api/redeem/stop	Stop redemption
+GET	/manifest.json	PWA manifest
+GET	/icon.svg	App icon
+GET	/sw.js	Service worker
+epidoro (/epidoro/app.py)
+Method	Path	Purpose
+GET	/	Render page
+GET	/manifest.json	PWA manifest
+GET	/icon.svg	App icon
+GET	/sw.js	Service worker
+GET	/api/stats	Get stats
+POST	/api/stats	Save stats (full overwrite)
+GET	/api/export	Export all data
+POST	/api/import	Import data
+GET	/api/redeem/status	Get redemption/free-day status
+POST	/api/redeem/start	Start screen-time redemption
+POST	/api/free-day-pass	Set/clear free day pass (new)
+POST	/api/redeem/stop	Stop redemption
+The new endpoint added in this session is POST /api/free-day-pass (epidoro only — the other two apps handle free day pass inline in their toggle/delete routes).

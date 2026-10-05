@@ -1,0 +1,11 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const args = process.argv.slice(2), source = args[args.indexOf('--source') + 1];
+if (!['EpiApps', 'EpiAppsTest'].includes(source)) throw new Error('Use --source EpiApps or --source EpiAppsTest. This imports a copy and keeps the originals intact.');
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const productivity = JSON.parse(await readFile(path.join(repo, source, 'data', 'epiproducitv.json'), 'utf8'));
+const shared = JSON.parse(await readFile(path.join(repo, source, 'data', 'stats.json'), 'utf8'));
+const response = await fetch('http://127.0.0.1:' + (process.env.PORT || 3210) + '/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productivity, shared }) });
+if (!response.ok) throw new Error((await response.json()).error);
+console.log(`Imported a copy of ${source}; previous Episuite data was backed up by the server.`);

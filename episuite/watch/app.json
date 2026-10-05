@@ -1,0 +1,45 @@
+{
+  "app": {
+    "appId": "com.epiblock.watch",
+    "version": "1.0.0",
+    "apiLevel": 3,
+    "vendor": "epiblock",
+    "appName": "Episuite"
+  },
+  "permissions": [],
+  "targets": {
+    "default": {
+      "module": {
+        "page": {
+          "pages": [
+            "page/home"
+          ]
+        },
+        "app-side": {
+          "path": "app-side/index"
+        },
+        "setting": {
+          "path": "setting/index"
+        }
+      },
+      "platforms": [
+        {
+          "name": "default",
+          "deviceSource": 0
+        }
+      ],
+      "designWidth": 390
+    }
+  },
+  "platforms": [
+    {
+      "st": "s"
+    }
+  ],
+  "i18n": {
+    "en-US": {
+      "appName": "EpiBlock"
+    }
+  },
+  "defaultLanguage": "en-US"
+}

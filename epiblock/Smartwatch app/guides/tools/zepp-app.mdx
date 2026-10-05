@@ -1,0 +1,60 @@
+---
+title: Zepp App Developer Mode
+sidebar_label: Zepp App Developer Mode
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl'
+
+## Introduction
+
+The developer mode in Zepp App has the following main functions.
+
+- Sacn the Mini Program or Watchface preview QR code to preview the Mini Program or Watchface on the real device
+- Watch Screenshot
+- View real device logs
+- Use Bridge mode to establish a connection
+
+## Developer mode opening method
+
+- Turn on
+  - Go to "Profile" => "Settings" => "About" and click the Zepp icon 7 times in a row until a pop-up window appears
+- Turn off
+  - Go to"Profile" => "Settings" and remove the Developer Mode option
+
+![devInfo.png](/img/docs/watchface/lesson/dev_info.jpg)
+
+## "Scan" real machine preview
+
+The "Zeus CLI" `preview` command compiles a preview and the "Watchface Maker" installation generates a QR code, which can be scanned and installed on the device using the "Scan" function.
+
+![installAppScanCode.png](/img/docs/watchface/lesson/install_app_scan_code.jpg)
+
+## Watch Screenshot
+
+Click the screenshot icon to take a screenshot on the watch device. The image will be stored on the device where Zepp App is installed, and can usually be viewed in the phone's photo gallery.
+
+<img src={useBaseUrl('/img/docs/watchface/lesson/screenshot_icon.jpg')} width="400" title="api_level" />
+
+## View real machine logs
+
+Click the Mini Program icon to enter the log screen, you can view the log screen of "Device App" and "Side Service".
+
+Click the button at the bottom right to start collecting logs, and then run the Mini Program on the real machine to collect the relevant logs.
+
+![installAppScanCode.png](/img/docs/guides/tools/real_machine_log.jpg)
+
+:::caution
+The "Settings app" real machine log is temporarily unavailable for viewing.
+:::
+
+## Turn on Bridge mode
+
+Click the Bridge button to enable Develop Bridge Mode.
+
+Please refer to [Developer Bridge Mode](../faq/developer-bridge-mode.md) for more information about the Develop Bridge mode.
+
+## Query the device API LEVEL
+
+Click the Device information button, a pop-up window will appear, showing the API_LEVEL of the watch device.
+
+<img src={useBaseUrl('/img/docs/watchface/lesson/device_information.jpeg')} width="400" title="api_level" />

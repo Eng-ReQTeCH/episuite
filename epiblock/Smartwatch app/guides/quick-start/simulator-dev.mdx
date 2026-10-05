@@ -1,0 +1,54 @@
+---
+title: 3. Running Simulator
+sidebar_label: 3. Running Simulator
+---
+
+In this step, we will accomplish the following tasks
+
+- Install Zepp OS Simulator
+- Installation of Amazfit Balance Watch device Simulator
+- Preview Zepp OS Mini Program on a Simulator
+
+## Install and run the Zepp OS Simulator
+
+According to the system version, download the corresponding Simulator installation package, follow the prompts to install, [Simulator download](../tools/simulator/download.md).
+
+After installation, run the Simulator and click the Simulator icon to run it.
+
+Taking Windows as an example, double-clicking the Simulator icon can launch the Simulator.
+
+![simulator_icon.jpg](/img/simulator/simulator_icon.jpg)
+
+:::info
+Simulator FAQ Reference [Simulator FAQ](../faq/simulator-faq.md)
+:::
+
+## Installation of watch device Simulator
+
+After launching the Simulator, we will see a screen like the one shown below.
+
+Click on the download button labeled "7" in the image below to enter the watch device Simulator download list screen and click on Download Amazfit Balance Simulator.
+
+![desk.png](/img/simulator/interface.png)
+
+Now that you've opened a screen that contains all Amazfit devices, locate the "Balance" simulator and download it.
+
+![download.jpg](/img/docs/quick-start/simulator_download.jpg)
+
+Once the download is complete, launch the watch device simulator by clicking on the Simulator icon at the top or selecting Amazfit Balance in the Simulator drop-down box.
+
+![device_simulator.jpg](/img/docs/quick-start/simulator_run.jpg)
+
+For more information about the Simulator, please refer to [Guide to using the simulator](../../guides/tools/simulator/index.md).
+
+## Simulator Preview
+
+Let's navigate to the `hello-world` directory using the terminal. Once there, run the [`zeus dev` compile preview command](../../guides/tools/cli/index.md#zeus-preview-compilation-preview-real-machine) compile preview command. This instructs the Zeus CLI to compile the project code and initiate a preview via the simulator.
+
+```sh
+zeus dev
+```
+
+Wait for the Mini Program to finish installing and preview our `hello-world` Mini Program in the Amazfit Balance Device Simulator.
+
+![hello world preview](/img/docs/quick-start/simulator_project_preview.jpg)

@@ -1,0 +1,7 @@
+data
+test-results
+tests
+.env
+.git
+.unlazy
+node_modules

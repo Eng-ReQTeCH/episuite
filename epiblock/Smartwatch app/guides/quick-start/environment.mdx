@@ -1,0 +1,64 @@
+---
+title: 1. Environmental Preparation
+sidebar_label: 1. Environmental Preparation
+---
+
+In this section, we will complete the following environment preparations.
+
+- Node.js (recommended LTS version)
+- Zeus CLI
+
+:::info
+
+If you run into any installation issues, it is recommended that you send the error message, operating system version, and the command you are currently running to AI for troubleshooting. This usually helps resolve the problem faster.
+
+:::
+
+## Install Node.js
+
+Visit the [Node.js Official website - Download](https://nodejs.org/en/download/package-manager).
+
+It is recommended to use the official installer and install the LTS version.
+
+If you are used to Node.js version managers, it is recommended that you follow the official command installation guide.
+
+The following installation commands are excerpted from the official website. This is an example of using `fnm` to install Node.js on macOS. For installation methods on other platforms, please refer to the official guide.
+
+```sh
+# Download and install fnm:
+curl -o- https://fnm.vercel.app/install | bash
+
+# Download and install Node.js:
+fnm install 24
+
+# Verify the Node.js version:
+node -v # Should print "v24.15.0".
+
+# Verify the npm version:
+npm -v # Should print "11.12.1".
+```
+
+:::info
+
+- In Windows, we recommend using the built-in `PowerShell` to execute commands as an administrator
+- It is recommended to use the built-in `Terminal` in MacOS and Linux to execute commands
+
+:::
+
+[Zeus CLI](../tools/cli/index.md) is a Zepp OS command-line toolset that we use to create, preview, compile, and build Zepp OS Mini Programs or Watchface projects.
+
+Step one, execute the installation command at the terminal.
+
+```sh
+npm i @zeppos/zeus-cli -g
+```
+
+:::tip
+If you encounter any issues while installing Zeus CLI, please see [Environment Installation FAQ](../faq/env-setup.md).
+:::
+
+Step two, check whether Zeus CLI is installed successfully. Execute the following command at the terminal. If the terminal displays a version number such as `1.9.0`, it means that the installation is successful.
+
+```sh
+zeus -v
+```
