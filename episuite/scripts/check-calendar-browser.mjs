@@ -1,0 +1,33 @@
+import {createRequire} from 'node:module';
+import {mkdtemp,mkdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {fileURLToPath} from 'node:url';
+import {createApp} from '../server.mjs';
+const require=createRequire('C:/Users/Monty/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/package.json');
+const {chromium}=require('playwright');
+const app=await createApp({dataDir:await mkdtemp(path.join(tmpdir(),'episuite-calendar-browser-'))});
+await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+const base=`http://127.0.0.1:${app.server.address().port}`;
+await fetch(base+'/api/onboarding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'paused',step:0})});
+let browser;
+try{
+ browser=await chromium.launch({headless:true,executablePath:process.env.CALENDAR_BROWSER || 'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ const context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(base);await page.locator('[data-action="nav"][data-id="plan"]').first().click({timeout:10000});
+ await page.locator('#plan-date').fill('2026-10-06');
+ await page.locator('[data-action="new-commitment"]').first().click();
+ await page.locator('#commit-name').fill('Sunday Monday course');await page.locator('#commit-date').fill('2026-10-01');await page.locator('#commit-endDate').fill('2026-10-31');await page.locator('[name="weekdays"][value="0"]').check();await page.locator('[name="weekdays"][value="1"]').check();await page.locator('#commit-location').fill('Learning room');await page.locator('#dialog [type="submit"]').click();
+ await page.locator('.commitment-row').filter({hasText:'Sunday Monday course'}).waitFor();
+ assert.equal(await page.locator('.calendar-event').count(),8);
+ await page.locator('[data-action="calendar-view"][data-id="week"]').click();assert.equal(await page.locator('.calendar-event').count(),2);
+ await page.locator('[data-action="calendar-view"][data-id="agenda"]').click();assert.equal(await page.locator('.calendar-event').count(),6);
+ await page.locator('[data-action="calendar-view"][data-id="month"]').click();await page.locator('[data-action="calendar-day"][data-id="2026-10-04"]').click();assert.equal(await page.locator('#plan-date').count(),1);
+ await page.locator('[data-action="skip-block"]').click();assert.equal(await page.locator('.timeblock').count(),0);
+ await page.locator('.commitment-row [data-action="edit-block"]').click();await page.locator('#commit-name').fill('Updated course');await page.locator('#dialog [type="submit"]').click();await page.locator('.commitment-row').filter({hasText:'Updated course'}).waitFor();
+ await page.reload();await page.locator('[data-action="calendar-view"][data-id="month"]').click();await page.locator('#plan-date').fill('2026-10-06');assert.equal(await page.locator('.calendar-event').count(),7);
+ await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});await page.screenshot({path:fileURLToPath(new URL('../test-results/calendar-desktop.png',import.meta.url)),fullPage:true});
+ await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Phone page must not overflow');await page.screenshot({path:fileURLToPath(new URL('../test-results/calendar-phone.png',import.meta.url)),fullPage:true});
+ assert.deepEqual(errors,[]);console.log('Calendar browser checks passed: create, month/week/agenda/day, skip, edit, reload, phone layout');
+}finally{await browser?.close();await app.close();}

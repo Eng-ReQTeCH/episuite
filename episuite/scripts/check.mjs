@@ -15,7 +15,7 @@ async function check(dir) {
   }
 }
 await check(root);
-for (const file of ['public/index.html', 'public/styles.css', 'public/app.js', 'public/domain.js', 'public/engagement.js', 'public/sw.js', 'public/icon.svg', 'public/manifest.webmanifest', 'public/cosmetics.json']) {
+for (const file of ['public/index.html', 'public/styles.css', 'public/app.js', 'public/domain.js', 'public/calendar.js', 'public/engagement.js', 'public/sw.js', 'public/icon.svg', 'public/manifest.webmanifest', 'public/cosmetics.json']) {
   if (!(await stat(path.join(root, file))).size) throw new Error(`Empty asset: ${file}`);
 }
 JSON.parse(await readFile(path.join(root, 'public/manifest.webmanifest')));

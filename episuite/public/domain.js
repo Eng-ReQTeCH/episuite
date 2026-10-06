@@ -76,12 +76,45 @@ export function blockInput(input, existing = {}) {
   const mode = input.mode ?? existing.mode ?? 'fixed';
   const start = String(input.start ?? existing.start ?? '09:00');
   if (!['fixed', 'relative'].includes(mode) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(start)) throw new InputError('Choose a valid start time.');
+  const commitment = Boolean(input.commitment ?? existing.commitment);
+  const endDate = input.endDate ?? existing.endDate ?? '';
+  if (endDate && (!validDate(endDate) || endDate < date)) throw new InputError('End date must be on or after the start date.');
+  const weekdays = input.weekdays ?? existing.weekdays ?? [];
+  if (!Array.isArray(weekdays) || weekdays.some(d => !Number.isInteger(Number(d)) || Number(d) < 0 || Number(d) > 6)) throw new InputError('Choose valid weekdays.');
+  const repeat = input.repeat ?? existing.repeat ?? 'none';
+  if (!['none', 'daily', 'weekly', 'weekdays'].includes(repeat)) throw new InputError('Choose a valid repeat schedule.');
+  if (repeat === 'weekdays' && !weekdays.length) throw new InputError('Choose at least one weekday.');
+  const reminder = 'reminderMinutes' in input ? input.reminderMinutes : 'reminderMinutes' in existing ? existing.reminderMinutes : commitment ? 15 : null;
+  if (reminder !== null && reminder !== '' && (!Number.isInteger(Number(reminder)) || Number(reminder) < 0 || Number(reminder) > 10080)) throw new InputError('Reminder must be between 0 and 10080 minutes.');
+  if (commitment && mode !== 'fixed') throw new InputError('Commitments need a fixed start time.');
+  const excludedDates = input.excludedDates ?? existing.excludedDates ?? [];
+  if (!Array.isArray(excludedDates) || excludedDates.some(d=>!validDate(d))) throw new InputError('Skipped dates must be valid dates.');
   return { ...existing, id: existing.id || uid(), name, date, mode, start, offset: finite(input.offset ?? existing.offset, 0, 1425, 0),
+    commitment, endDate, weekdays: [...new Set(weekdays.map(Number))].sort(), reminderMinutes: reminder === null || reminder === '' ? null : Number(reminder),
+    location: String(input.location ?? existing.location ?? '').slice(0, 300), description: String(input.description ?? existing.description ?? '').slice(0, 3000),
+    excludedDates: [...new Set(excludedDates)].sort(),
     duration: finite(input.duration ?? existing.duration, 5, 480, 30), shift: existing.shift || 0,
-    repeat: ['none', 'daily', 'weekly'].includes(input.repeat ?? existing.repeat) ? (input.repeat ?? existing.repeat) : 'none',
+    repeat,
     taskIds: Array.isArray(input.taskIds) ? input.taskIds.map(String).slice(0, 50) : existing.taskIds || [], kind: input.kind === 'break' ? 'break' : input.kind === 'focus' ? 'focus' : existing.kind || 'focus' };
 }
-export function blockOnDate(block, date) { return block.date === date || (block.date < date && (block.repeat === 'daily' || (block.repeat === 'weekly' && (Date.parse(date) - Date.parse(block.date)) % (7 * 86400000) === 0))); }
+export function blockOnDate(block, date) {
+  if (date < block.date || (block.endDate && date > block.endDate) || block.excludedDates?.includes(date)) return false;
+  if (block.repeat === 'weekdays') return block.weekdays.includes(new Date(`${date}T12:00:00Z`).getUTCDay());
+  return block.date === date || block.repeat === 'daily' || (block.repeat === 'weekly' && (Date.parse(date) - Date.parse(block.date)) % (7 * 86400000) === 0);
+}
+export function calendarDates(start, end = start) {
+  if (!validDate(start) || !validDate(end) || end < start || (Date.parse(end) - Date.parse(start)) / 86400000 > 366) throw new InputError('Choose a calendar range of up to one year.');
+  const days = [];
+  for (let d = start; d <= end; d = addDays(d, 1)) days.push(d);
+  return days;
+}
+export function dueReminders(state, now = Date.now()) {
+  const day = dateKey(now, state.settings.timezone);
+  return calendarDates(addDays(day, -1), addDays(day, 7)).flatMap(date => schedule(state, date).filter(b => b.startMinute !== null && b.reminderMinutes != null).map(b => {
+    const startsAt = zonedTimestamp(date, b.startMinute, state.settings.timezone);
+    return { id: `${b.id}:${date}:${startsAt}:${b.reminderMinutes}`, blockId: b.id, date, name: b.name, location: b.location || '', startsAt, remindAt: startsAt - b.reminderMinutes * 60000 };
+  })).filter(r => r.remindAt <= now && r.startsAt >= now);
+}
 export function schedule(state, date) {
   return state.blocks.filter(b => blockOnDate(b, date)).map(b => {
     const [h, m] = b.start.split(':').map(Number);
@@ -219,13 +252,14 @@ function normalizeHistory(history) {
   }
   return result;
 }
-export function calendarText(state, date) {
+export function calendarText(state, date, endDate = date) {
   const escape = s => String(s).replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/[,;]/g, '\\$&');
   const stamp = (day, minute) => { const d = new Date(Date.parse(`${day}T00:00:00Z`) + minute * 60000); return d.toISOString().replace(/[-:]/g, '').slice(0, 15); };
-  const events = schedule(state, date).filter(b => b.startMinute !== null).map(b => [
+  const events = calendarDates(date, endDate).flatMap(date => schedule(state, date).filter(b => b.startMinute !== null).map(b => [
     'BEGIN:VEVENT', `UID:${b.id}-${date}@episuite`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`,
     `DTSTART;TZID=${state.settings.timezone}:${stamp(date, b.startMinute)}`, `DTEND;TZID=${state.settings.timezone}:${stamp(date, b.endMinute)}`,
-    `SUMMARY:${escape(b.name)}`, `DESCRIPTION:${escape(b.taskIds.map(id => state.tasks.find(t => t.id === id)?.title).filter(Boolean).join('\n'))}`, 'END:VEVENT'
-  ]);
+    `SUMMARY:${escape(b.name)}`, `LOCATION:${escape(b.location || '')}`, `DESCRIPTION:${escape([b.description, ...b.taskIds.map(id => state.tasks.find(t => t.id === id)?.title)].filter(Boolean).join('\n'))}`,
+    ...(b.reminderMinutes == null ? [] : ['BEGIN:VALARM', `TRIGGER:-PT${b.reminderMinutes}M`, 'ACTION:DISPLAY', `DESCRIPTION:${escape(b.name)}`, 'END:VALARM']), 'END:VEVENT'
+  ]));
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Episuite//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR'].join('\r\n') + '\r\n';
 }

@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir, rename, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {engagementInput,feelingInput} from './public/engagement.js';
-import { initialState, dateKey, uid, taskInput, blockInput, toggleCompletion, startTimer, pauseTimer, resumeTimer, finishTimer, remaining, schedule, metrics, legacyImport, calendarText, finite, validDate, done, zonedTimestamp } from './public/domain.js';
+import { initialState, dateKey, uid, taskInput, blockInput, toggleCompletion, startTimer, pauseTimer, resumeTimer, finishTimer, remaining, schedule, metrics, legacyImport, calendarText, calendarDates, finite, validDate, done, zonedTimestamp } from './public/domain.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -81,7 +81,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
       }
       return json(res, data);
     }
-    if (req.method === 'GET' && p === '/api/calendar.ics') { res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': 'attachment; filename="episuite.ics"' }); return res.end(calendarText(state, date)); }
+    if (req.method === 'GET' && p === '/api/calendar.ics') { const text = calendarText(state, date, url.searchParams.get('end') || date); res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': 'attachment; filename="episuite.ics"' }); return res.end(text); }
     if (req.method === 'GET' && p === '/api/v1/day') {
       const blocks = schedule(state, date).map((b, i) => ({ ...b, block_index: i, start: b.startMinute === null ? null : new Date(zonedTimestamp(date, b.startMinute, state.settings.timezone)).toISOString(), end: b.endMinute === null ? null : new Date(zonedTimestamp(date, b.endMinute, state.settings.timezone)).toISOString(), tasks: b.taskIds.map(id => state.tasks.find(t => t.id === id)).filter(t => t && !t.deleted).map(t => ({ id: t.id, title: t.title, block_index: i, status: done(t, date) ? 'completed' : 'pending', duration_minutes: t.minutes })) }));
       return json(res, { day: { wakeup_time: state.wake[date] || null, blocks, tasks: blocks.flatMap(b => b.tasks) } });
@@ -127,6 +127,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           Object.assign(t, taskInput(data, t)); return t;
         }
         if (p === '/api/blocks' && req.method === 'POST') { const b = blockInput(data); state.blocks.push(b); return b; }
+        if (p === '/api/blocks/skip') { const b = state.blocks.find(b => b.id === data.id); if (!b) throw fail('Block not found.', 404); if (!schedule(state,date).some(x=>x.id===b.id)) throw fail('This occurrence was not found.'); b.excludedDates = [...new Set([...(b.excludedDates || []), date])]; return {ok:true}; }
         if (p === '/api/blocks/feedback') { if (!state.blocks.some(b => b.id === data.id)) throw fail('Block not found.', 404); state.blockFeedback ||= {}; state.blockFeedback[date + ':' + data.id] = Boolean(data.completed); return { ok: true }; }
         const blockMatch = p.match(/^\/api\/blocks\/([^/]+)$/);
         if (blockMatch) { const b = state.blocks.find(b => b.id === blockMatch[1]); if (!b) throw fail('Block not found.', 404); if('expectedVersion' in data&&Number(data.expectedVersion)!==(b.editVersion||0))throw fail('This block changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409); if (req.method === 'DELETE') { state.blocks = state.blocks.filter(x => x.id !== b.id); return { ok: true }; } Object.assign(b, blockInput(data, b)); return b; }
@@ -188,6 +189,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     }
     if (req.method !== 'GET') throw fail('Method not supported.', 405);
     const assets = { '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/domain.js': ['domain.js', 'text/javascript'], '/engagement.js': ['engagement.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
+    assets['/calendar.js'] = ['calendar.js', 'text/javascript'];
     for(const file of ['icon-192.png','icon-512.png','apple-touch-icon.png'])assets['/'+file]=[file,'image/png'];
     if (!assets[p]) throw fail('Page not found.', 404);
     const [asset, type] = assets[p]; const content = await readFile(path.join(root, 'public', asset));
@@ -203,12 +205,13 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     if (req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) throw fail('Cross-site requests are blocked.', 403);
     const data = await body(req), date = data.date || dateKey(Date.now(), state.settings.timezone);
     if (!validDate(date)) throw fail('Choose a valid date.');
+    const dates = calendarDates(date, data.end || date);
     if (!state.calendar.url || !state.calendar.password) throw fail('Save your calendar collection URL and credentials first.');
     const config = structuredClone(state.calendar), snapshot = structuredClone(state);
     const headers = { Authorization: `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`, 'Content-Type': 'text/calendar; charset=utf-8' };
     let count = 0;
     if (req.url.split('?')[0] === '/api/calendar/delete') {
-      for (const [key, eventUrl] of Object.entries(config.eventUrls).filter(([key]) => key.endsWith(':' + date))) {
+      for (const [key, eventUrl] of Object.entries(config.eventUrls).filter(([key]) => dates.includes(key.slice(key.lastIndexOf(':')+1)))) {
         if (!eventUrl.startsWith(config.url.replace(/\/+$/, '') + '/')) throw fail('The calendar URL changed. Reconnect the original collection before removing its events.');
         const response = await fetch(eventUrl, { method: 'DELETE', headers, redirect: 'error', signal: AbortSignal.timeout(15000) });
         if (!response.ok && response.status !== 404) throw fail(`Calendar rejected removal (${response.status}).`);
@@ -216,7 +219,14 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
       }
       return json(res, { count, state: safeState() });
     }
-    for (const b of schedule(snapshot, date).filter(b => b.startMinute !== null)) {
+    const desired = new Set(dates.flatMap(day=>schedule(snapshot,day).filter(b=>b.startMinute!==null).map(b=>b.id+':'+day)));
+    for(const [key,eventUrl] of Object.entries(config.eventUrls).filter(([key])=>dates.includes(key.slice(key.lastIndexOf(':')+1))&&!desired.has(key))){
+      if(!eventUrl.startsWith(config.url.replace(/\/+$/, '')+'/'))throw fail('Reconnect the original calendar before removing its events.');
+      const response=await fetch(eventUrl,{method:'DELETE',headers,redirect:'error',signal:AbortSignal.timeout(15000)});
+      if(!response.ok&&response.status!==404)throw fail(`Calendar rejected removal (${response.status}).`);
+      await mutate(()=>{delete state.calendar.eventUrls[key];});
+    }
+    for (const date of dates) for (const b of schedule(snapshot, date).filter(b => b.startMinute !== null)) {
       const eventUrl = `${config.url.replace(/\/+$/, '')}/${encodeURIComponent(b.id + '-' + date)}.ics`;
       const one = { ...snapshot, blocks: [b] };
       const response = await fetch(eventUrl, { method: 'PUT', headers, redirect: 'error', body: calendarText(one, date), signal: AbortSignal.timeout(15000) });

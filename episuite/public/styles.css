@@ -96,3 +96,29 @@ kbd,.kbd{font:11px Consolas,monospace;padding:3px 6px;border:1px solid var(--lin
 @media(max-width:600px){.now-grid,.support-grid{grid-template-columns:minmax(0,1fr)}.now-grid>*{min-width:0}.timer-panel .timer-modes button{padding:8px 10px}.timer-panel .duration button{padding:6px 9px}}
 .guide-entry{white-space:nowrap;min-height:44px}.top-actions{flex-wrap:wrap}
 @media(max-width:600px){.topbar .breadcrumb{display:none}.topbar{min-height:52px}.top-actions{width:100%;justify-content:space-between}.topbar .guide-entry{min-height:44px}}
+/* Calendar and recurring commitments */
+.calendar-toolbar {gap:10px;flex-wrap:wrap;margin-bottom:24px}
+.calendar-toolbar input {max-width:160px}
+.calendar-period {margin:24px 0 18px}
+.calendar-scroll {overflow-x:auto;margin-bottom:28px;border:1px solid var(--line);border-radius:14px}
+.calendar-grid {display:grid;grid-template-columns:repeat(7,minmax(110px,1fr))}
+.calendar-weekday {padding:12px;text-align:center;font-size:.8rem;color:var(--muted);border-bottom:1px solid var(--line)}
+.calendar-cell {min-height:150px;padding:10px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);min-width:0}
+.calendar-cell.is-today {background:color-mix(in srgb,var(--accent,#316b57) 8%,transparent)}
+.calendar-cell.outside-month {opacity:.55}
+.calendar-date {background:none;border:0;color:inherit;font:inherit;font-size:.85rem;padding:4px 0 10px;cursor:pointer;text-align:left}
+.calendar-date:hover {text-decoration:underline}
+.calendar-event {display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;font:inherit;font-size:.78rem;padding:9px;margin-bottom:7px;color:inherit;background:var(--surface,#fff);border:1px solid var(--line);border-radius:7px;cursor:pointer;overflow-wrap:anywhere}
+.calendar-event strong {font-weight:600}
+.commitment-event {border-left:3px solid var(--accent,#316b57)}
+.calendar-clash {display:block;color:var(--danger);margin-bottom:8px}
+.calendar-agenda {grid-template-columns:1fr}
+.calendar-agenda .calendar-cell {min-height:0;display:grid;grid-template-columns:160px 1fr;gap:12px}
+.calendar-agenda .calendar-cell .calendar-event {grid-column:2}
+.commitments-panel {margin-top:28px;padding:24px;border:1px solid var(--line);border-radius:14px}
+.commitment-row {display:flex;justify-content:space-between;gap:20px;padding:20px 0;border-bottom:1px solid var(--line)}
+.commitments-panel > .row:last-child {margin-top:20px}
+.commitment-days {display:flex;gap:14px;flex-wrap:wrap;padding:16px;margin-bottom:20px;border:1px solid var(--line);border-radius:8px}
+.commitment-days label {display:flex;gap:6px;align-items:center}
+.commitment-days input {width:auto}
+@media(max-width:800px){.calendar-month,.calendar-week {min-width:770px}.commitment-row {flex-direction:column}.commitments-panel {padding:16px}.calendar-agenda .calendar-cell {grid-template-columns:1fr}.calendar-agenda .calendar-cell .calendar-event {grid-column:1}}
