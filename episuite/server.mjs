@@ -1,3 +1,4 @@
+import {syncCalDAV} from './caldav.mjs';
 import http from 'node:http';
 import { readFile, writeFile, mkdir, rename, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -142,10 +143,10 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           const updated = taskInput(data,t);validatePeople(state,updated.personIds);Object.assign(t, updated); return t;
         }
         if (p === '/api/blocks' && req.method === 'POST') { const b = blockInput(data);validatePeople(state,b.personIds);if(data.socialPlan&&!b.personIds.length)throw fail('Choose at least one person for this plan.');assignBlockColor(b,state.blocks); state.blocks.push(b); return b; }
-        if (p === '/api/blocks/skip') { const b = state.blocks.find(b => b.id === data.id); if (!b) throw fail('Block not found.', 404); if (!schedule(state,date).some(x=>x.id===b.id)) throw fail('This occurrence was not found.'); b.excludedDates = [...new Set([...(b.excludedDates || []), date])]; return {ok:true}; }
+        if (p === '/api/blocks/skip') { const b = state.blocks.find(b => b.id === data.id); if (!b) throw fail('Block not found.', 404); if(b.caldav)throw fail('Skip server events in your calendar client, then sync again.'); if (!schedule(state,date).some(x=>x.id===b.id)) throw fail('This occurrence was not found.'); b.excludedDates = [...new Set([...(b.excludedDates || []), date])]; return {ok:true}; }
         if (p === '/api/blocks/feedback') { if (!state.blocks.some(b => b.id === data.id)) throw fail('Block not found.', 404); state.blockFeedback ||= {}; state.blockFeedback[date + ':' + data.id] = Boolean(data.completed); return { ok: true }; }
         const blockMatch = p.match(/^\/api\/blocks\/([^/]+)$/);
-        if (blockMatch) { const b = state.blocks.find(b => b.id === blockMatch[1]); if (!b) throw fail('Block not found.', 404); if('expectedVersion' in data&&Number(data.expectedVersion)!==(b.editVersion||0))throw fail('This block changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409); if (req.method === 'DELETE') { state.blocks = state.blocks.filter(x => x.id !== b.id); return { ok: true }; } const updated=blockInput(data,b);validatePeople(state,updated.personIds);assignBlockColor(updated,state.blocks.filter(x=>x.id!==b.id));Object.assign(b,updated); return b; }
+        if (blockMatch) { const b = state.blocks.find(b => b.id === blockMatch[1]); if (!b) throw fail('Block not found.', 404); if('expectedVersion' in data&&Number(data.expectedVersion)!==(b.editVersion||0))throw fail('This block changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409); if(b.caldav?.readOnly)throw fail('Edit recurring or all-day server events in your calendar client, then sync again.'); if (req.method === 'DELETE') { state.blocks = state.blocks.filter(x => x.id !== b.id); return { ok: true }; } if(b.caldav&&data.repeat&&data.repeat!=='none')throw fail('Set recurrence in your calendar client, then sync again.'); const updated=blockInput(data,b);validatePeople(state,updated.personIds);assignBlockColor(updated,state.blocks.filter(x=>x.id!==b.id));Object.assign(b,updated); return b; }
         if (p === '/api/schedule/shift') { const shift = finite(data.minutes, -120, 120, 15); for (const b of state.blocks.filter(b => b.date === date && b.mode === 'relative')) b.shift += shift; return { ok: true }; }
         if (p === '/api/day/wake') { state.wake[date] = Date.now(); return { ok: true }; }
         if (p === '/api/day/end') { for (const t of state.tasks.filter(t => t.lane === 'today' && !t.completed)) t.lane = 'inbox'; state.checkins[date] = { ...state.checkins[date], reflection: String(data.reflection || '').slice(0, 2000), ended: true }; return { ok: true }; }
@@ -218,40 +219,25 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
       routeCalendar(req, res).catch(e => json(res, { error: e.message }, e.status || 502));
     } else route(req, res).catch(e => { if (!res.headersSent) json(res, { error: e.status ? e.message : 'Could not complete this action. Please try again.',...(e.status===409?{state:safeState()}: {}) }, e.status || 500); });
   });
-  async function routeCalendar(req, res) {
+  let calendarQueue=Promise.resolve();
+  function routeCalendar(req,res){const job=calendarQueue.then(()=>runCalendar(req,res));calendarQueue=job.catch(()=>{});return job;}
+  async function runCalendar(req, res) {
     if (req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) throw fail('Cross-site requests are blocked.', 403);
     const data = await body(req), date = data.date || dateKey(Date.now(), state.settings.timezone);
     if (!validDate(date)) throw fail('Choose a valid date.');
     const dates = calendarDates(date, data.end || date);
     if (!state.calendar.url || !state.calendar.password) throw fail('Save your calendar collection URL and credentials first.');
-    const config = structuredClone(state.calendar), snapshot = structuredClone(state);
-    const headers = { Authorization: `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`, 'Content-Type': 'text/calendar; charset=utf-8' };
-    let count = 0;
-    if (req.url.split('?')[0] === '/api/calendar/delete') {
-      for (const [key, eventUrl] of Object.entries(config.eventUrls).filter(([key]) => dates.includes(key.slice(key.lastIndexOf(':')+1)))) {
-        if (!eventUrl.startsWith(config.url.replace(/\/+$/, '') + '/')) throw fail('The calendar URL changed. Reconnect the original collection before removing its events.');
-        const response = await fetch(eventUrl, { method: 'DELETE', headers, redirect: 'error', signal: AbortSignal.timeout(15000) });
-        if (!response.ok && response.status !== 404) throw fail(`Calendar rejected removal (${response.status}).`);
-        count++; await mutate(() => { delete state.calendar.eventUrls[key]; });
-      }
-      return json(res, { count, state: safeState() });
-    }
-    const desired = new Set(dates.flatMap(day=>schedule(snapshot,day).filter(b=>b.startMinute!==null).map(b=>b.id+':'+day)));
-    for(const [key,eventUrl] of Object.entries(config.eventUrls).filter(([key])=>dates.includes(key.slice(key.lastIndexOf(':')+1))&&!desired.has(key))){
-      if(!eventUrl.startsWith(config.url.replace(/\/+$/, '')+'/'))throw fail('Reconnect the original calendar before removing its events.');
-      const response=await fetch(eventUrl,{method:'DELETE',headers,redirect:'error',signal:AbortSignal.timeout(15000)});
-      if(!response.ok&&response.status!==404)throw fail(`Calendar rejected removal (${response.status}).`);
-      await mutate(()=>{delete state.calendar.eventUrls[key];});
-    }
-    for (const date of dates) for (const b of schedule(snapshot, date).filter(b => b.startMinute !== null)) {
-      const eventUrl = `${config.url.replace(/\/+$/, '')}/${encodeURIComponent(b.id + '-' + date)}.ics`;
-      const one = { ...snapshot, blocks: [b] };
-      const response = await fetch(eventUrl, { method: 'PUT', headers, redirect: 'error', body: calendarText(one, date), signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw fail(`Calendar rejected the event (${response.status}). ${count} events synced; check your collection URL and credentials.`);
-      count++;
-      await mutate(() => { state.calendar.eventUrls[b.id + ':' + date] = eventUrl; return null; });
-    }
-    return json(res, { count, state: safeState() });
+    const snapshot=structuredClone(state);
+    const result=await syncCalDAV(snapshot,dates,req.url.split('?')[0]==='/api/calendar/delete');
+    await mutate(()=>{
+      if(state.calendar.url!==snapshot.calendar.url)throw fail('Calendar connection changed during sync. Sync again.',409);
+      const before=new Map(snapshot.blocks.map(b=>[b.id,JSON.stringify(b)]));
+      const after=new Map(result.blocks.map(b=>[b.id,b]));
+      for(let i=state.blocks.length-1;i>=0;i--){const b=state.blocks[i];if(before.get(b.id)!==JSON.stringify(b))continue;if(after.has(b.id))Object.assign(b,after.get(b.id));else state.blocks.splice(i,1);}
+      for(const b of result.blocks)if(!before.has(b.id)&&!state.blocks.some(x=>x.id===b.id)){assignBlockColor(b,state.blocks);state.blocks.push(b);}
+      state.calendar=result.calendar;
+    });
+    return json(res,{...result,blocks:undefined,calendar:undefined,state:safeState()});
   }
   return { server, getState: () => structuredClone(state), close: async () => {const stopped=new Promise(resolve=>server.close(resolve));server.closeAllConnections();await queue;await stopped;} };
 }

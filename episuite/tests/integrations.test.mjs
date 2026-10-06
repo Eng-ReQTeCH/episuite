@@ -1,3 +1,4 @@
+import {calendarMock} from './caldav-helper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -8,7 +9,7 @@ import { createApp } from '../server.mjs';
 import { initialState, taskInput, toggleCompletion, legacyImport, zonedTimestamp } from '../public/domain.js';
 test('CalDAV PUT sends valid event bodies and DELETE removes only known events', async () => {
   const observed = [];
-  const mock = http.createServer(async (req, res) => { let body = ''; for await (const c of req) body += c; observed.push({ method: req.method, url: req.url, auth: req.headers.authorization, body }); res.writeHead(req.method === 'PUT' ? 201 : 204); res.end(); });
+  const {server:mock}=calendarMock(observed);
   await new Promise(resolve => mock.listen(0, '127.0.0.1', resolve));
   const app = await createApp({ dataDir: await mkdtemp(path.join(tmpdir(), 'episuite-caldav-')) });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));

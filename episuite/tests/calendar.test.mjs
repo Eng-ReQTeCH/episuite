@@ -1,3 +1,4 @@
+import {calendarMock} from './caldav-helper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -40,7 +41,7 @@ test('calendar navigation handles month/year transitions and leap years',()=>{
 });
 test('commitment CRUD, skips, range sync reconciliation and restart integrate',async()=>{
   const observed=[];
-  const mock=http.createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;observed.push({method:req.method,url:req.url,body});res.writeHead(req.method==='PUT'?201:204);res.end();});
+  const {server:mock}=calendarMock(observed);
   await new Promise(resolve=>mock.listen(0,'127.0.0.1',resolve));
   const dataDir=await mkdtemp(path.join(tmpdir(),'episuite-commitments-'));let app=await createApp({dataDir});
   await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));let base=`http://127.0.0.1:${app.server.address().port}`;

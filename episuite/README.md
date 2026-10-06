@@ -28,10 +28,13 @@ The [engagement review](ENGAGEMENT-REVIEW.md) records the original twenty passes
 
 ## Run
 
-Requires Node.js 22 or newer. No packages, build process, Python, database installation, or network downloads are required.
+Requires Node.js 22 or newer. Run `npm ci` once to install the locked calendar parsing dependencies. No build process or database installation is required. Python is only used by the optional Radicale interoperability test.
+
+To run the isolated interoperability check, install Radicale with `python -m pip install --target test-results/radicale-runtime radicale`, then run `node scripts/check-radicale.mjs`. Set `RADICALE_PYTHON` if your Python executable has a different name or location. The check starts a disposable loopback server and does not access your calendar.
 
 ```powershell
 cd "D:\ai inference\epi suite\episuite"
+npm ci
 node server.mjs
 ```
 
@@ -125,7 +128,7 @@ EpiBlock uses SQLite, not these JSON formats. Use its task/block APIs to obtain 
 
 **Reminders:** Enable device reminders from Calendar. Episuite checks due reminders every ten seconds while open, using your workspace timezone and suppressing repeated alerts on that browser. In-app reminders work without notification permission. Browsers may suspend background tabs; closed-app delivery is handled by importing the alarm-bearing .ics export into your calendar or syncing to a CalDAV calendar that supports alarms.
 
-**CalDAV:** Enter the full calendar collection URL, username, and app password in preferences. Save, then use **Sync this range** in Calendar (or Sync today in settings). **Export this range** downloads .ics with concrete occurrences and reminder alarms. Ranges are limited to one year. Sync updates events and removes previously synced events that were deleted or skipped within that range, targeting only URLs recorded by Episuite. Dates outside the selected range stay untouched. Sync is tested against a local HTTP mock; provider-specific discovery and real credentials have not been tested. Prefer HTTPS for a remote calendar.
+**CalDAV:** Enter the full calendar collection URL, username, and password in preferences. Radicale is verified against an isolated real server. Use **Sync this range** in Calendar, or **Sync today** in settings: local commitments and blocks are uploaded if missing; server events are imported into Calendar, Now, Social where linked, and the watch feed. Sync tracks resource identities and ETags, avoids repeat uploads, propagates one-off edits and deletions both ways, and protects simultaneous edits with conditional requests. Local recurring commitments are uploaded as dated occurrences for the selected range (up to one year); sync later ranges when needed. Sync runs when requested, not on a background schedule. Server recurrence rules and exceptions remain on the server; imported occurrences are protected from local editing. All-day and events over eight hours appear as protected blocks of up to eight hours; edit them in your calendar client. Conflicts keep both copies and are reported; restore the local fields to their last synced values before syncing to accept a server edit. Export this range downloads alarm-bearing .ics. Use the original collection to reconcile tracked events before changing providers. HTTPS is recommended.
 
 **Ollama:** install the configured model on a reachable Ollama server. Direct Node startup defaults to `127.0.0.1:11434`. Docker defaults to `host.docker.internal:11434`, mapped to the Docker host; Ollama must listen on an address reachable from that container. Set `EPISUITE_OLLAMA_URL` to its full `/api/generate` URL in .env when using another host/container. In task editing, choose **Break into small steps**. Suggestions fill the editor for review; they do not save automatically. Manual steps work without it. Live model generation has not been exercised here.
 
