@@ -1,5 +1,9 @@
 # Simulated user judge
 
+## Latest release: calendar colors, habit spacing, Social and PWA
+
+The current scoped release review is **9.9/10**, following 9.4 and 9.7 walkthrough passes and their corrections. See [SOCIAL-JUDGE.md](SOCIAL-JUDGE.md) for the rubric, observed evidence, defects corrected, and external validation limits. This remains a building-agent self-review. The earlier reviews below are historical assessments of previous releases.
+
 ## Guided-onboarding pass
 
 The owner accepted the revised appearance, then identified friction in turning the workspace into a daily system. They requested a general page-by-page guide that starts light, rather than personally preloaded routines.

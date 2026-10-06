@@ -3,6 +3,8 @@ import { readFile, writeFile, mkdir, rename, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {engagementInput,feelingInput} from './public/engagement.js';
+import {circleInput,personInput,validatePeople,addCheckin,contactTask,syncContactCompletion,normalizeSocial} from './public/social-domain.js';
+import {assignBlockColor,undoLastCompletion} from './public/domain.js';
 import { initialState, dateKey, uid, taskInput, blockInput, toggleCompletion, startTimer, pauseTimer, resumeTimer, finishTimer, remaining, schedule, metrics, legacyImport, calendarText, calendarDates, finite, validDate, done, zonedTimestamp } from './public/domain.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +19,8 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   if (state.version !== 1 || !Array.isArray(state.tasks) || !Array.isArray(state.blocks)) throw new Error('Episuite data has an unsupported format. Restore a valid backup.');
   const defaults = initialState();
   state = { ...defaults, ...state, settings: { ...defaults.settings, ...state.settings }, calendar: { ...defaults.calendar, ...state.calendar } };
+  normalizeSocial(state);
+  for(const block of state.blocks)assignBlockColor(block,state.blocks.filter(b=>b!==block));
   let queue = Promise.resolve();
   const save = async () => { await writeFile(`${file}.tmp`, JSON.stringify(state, null, 2)); await rename(`${file}.tmp`, file); };
   if(!state.workspaceId){state.workspaceId=uid();await save();}
@@ -28,6 +32,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         const previous=new Map(before[list].map(record=>[record.id,record]));
         for(const record of state[list]){const old=previous.get(record.id);if(!old||JSON.stringify(old)!==JSON.stringify(record))record.editVersion=(Number(old?.editVersion)||0)+1;}
       }
+      for(const list of ['people','circles']){const previous=new Map((before.social?.[list]||[]).map(r=>[r.id,r]));for(const record of state.social[list]){const old=previous.get(record.id);if(!old||JSON.stringify(old)!==JSON.stringify(record))record.editVersion=(Number(old?.editVersion)||0)+1;}}
       state.revision++; await save(); return result;
     } catch (e) { state = before; throw e; } });
     queue = job.catch(() => {}); return job;
@@ -102,6 +107,15 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         } catch { throw fail('Ollama is unavailable or returned an invalid response. You can add small steps yourself.', 503); }
       }
       const result = await mutate(async () => {
+        if(p==='/api/social/circles'&&req.method==='POST'){const c=circleInput(data);if(state.social.circles.some(x=>x.name.toLowerCase()===c.name.toLowerCase()))throw fail('This circle already exists.');state.social.circles.push(c);return c;}
+        const circleMatch=p.match(/^\/api\/social\/circles\/([^/]+)$/);
+        if(circleMatch){const c=state.social.circles.find(c=>c.id===circleMatch[1]);if(!c)throw fail('Circle not found.',404);if('expectedVersion' in data&&Number(data.expectedVersion)!==(c.editVersion||0))throw fail('This circle changed on another device. Reopen the editor.',409);if(req.method==='DELETE'){state.social.circles=state.social.circles.filter(x=>x.id!==c.id);for(const person of state.social.people)person.circleIds=person.circleIds.filter(id=>id!==c.id);return {ok:true};}const updated=circleInput(data,c);if(state.social.circles.some(x=>x.id!==c.id&&x.name.toLowerCase()===updated.name.toLowerCase()))throw fail('This circle already exists.');Object.assign(c,updated);return c;}
+        if(p==='/api/social/people'&&req.method==='POST'){const person=personInput(data,{},state.social);if(person.lastChecked>date)throw fail('Last check-in cannot be in the future.');state.social.people.push(person);return person;}
+        const personMatch=p.match(/^\/api\/social\/people\/([^/]+)$/);
+        if(personMatch){const person=state.social.people.find(x=>x.id===personMatch[1]);if(!person)throw fail('Person not found.',404);if('expectedVersion' in data&&Number(data.expectedVersion)!==(person.editVersion||0))throw fail('This person changed on another device. Reopen the editor.',409);if(req.method==='DELETE'){state.social.people=state.social.people.filter(x=>x.id!==person.id);state.social.checkins=state.social.checkins.filter(x=>x.personId!==person.id);for(const r of [...state.tasks,...state.blocks])r.personIds=(r.personIds||[]).filter(id=>id!==person.id);return {ok:true};}const updated=personInput(data,person,state.social);if(updated.lastChecked>date)throw fail('Last check-in cannot be in the future.');Object.assign(person,updated);return person;}
+        if(p==='/api/social/checkins'&&req.method==='POST')return addCheckin(state,data,date);
+        if(p==='/api/social/checkins/delete'){const checkin=state.social.checkins.find(c=>c.id===data.id);if(!checkin)throw fail('Check-in not found.',404);if(checkin.taskId)throw fail('Undo the linked task completion to remove this check-in.');state.social.checkins=state.social.checkins.filter(c=>c.id!==data.id);return {ok:true};}
+        if(p==='/api/social/contact-task')return contactTask(state,data.personId,date);
         if(p==='/api/engagement/feeling'){
           const entry=feelingInput(data,state);state.feelings=[...(state.feelings||[]).filter(f=>f.sessionId!==entry.sessionId),entry].slice(-60);
           if(entry.feeling==='quieter')state.engagement=engagementInput({feedback:false,haptics:false,chime:false},state.engagement);
@@ -113,24 +127,25 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           state.onboarding = {status:data.status,step:data.step,startedAt:state.onboarding?.startedAt||Date.now(),updatedAt:Date.now()};
           return state.onboarding;
         }
-        if (p === '/api/tasks' && req.method === 'POST') { const task = taskInput(data); if (task.lane === 'today' && state.tasks.filter(t => t.lane === 'today' && !t.deleted && !done(t, date)).length >= 3) throw fail('Keep today small: move a task back to your inbox first.'); task.order = Math.max(0, ...state.tasks.map(t => t.order)) + 1; state.tasks.push(task); return task; }
-        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move))?$/);
+        if (p === '/api/tasks' && req.method === 'POST') { const task = taskInput(data); validatePeople(state,task.personIds); if (task.lane === 'today' && state.tasks.filter(t => t.lane === 'today' && !t.deleted && !done(t, date)).length >= 3) throw fail('Keep today small: move a task back to your inbox first.'); task.order = Math.max(0, ...state.tasks.map(t => t.order)) + 1; state.tasks.push(task); return task; }
+        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move|undo))?$/);
         if (taskMatch) {
           const [, id, action] = taskMatch, t = state.tasks.find(t => t.id === id);
           if (!t) throw fail('Task not found.', 404);
           if('expectedVersion' in data&&Number(data.expectedVersion)!==(t.editVersion||0))throw fail('This task changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409);
-          if (action === 'complete') return { delta: toggleCompletion(state, id, date) };
+          if(action==='undo'){const delta=undoLastCompletion(state,id,date);syncContactCompletion(state,t);return {delta};}
+          if (action === 'complete') {const delta=toggleCompletion(state,id,date);syncContactCompletion(state,t);return {delta};}
           if (action === 'restore') { t.deleted = false; t.lane = 'inbox'; return t; }
           if (req.method === 'DELETE') { t.deleted = true; return t; }
           if (action === 'move' && data.direction) { const sorted = state.tasks.filter(x => !x.deleted && x.lane === t.lane).sort((a, b) => a.order - b.order); const i = sorted.indexOf(t); const other = sorted[i + (data.direction === 'up' ? -1 : 1)]; if (other) [t.order, other.order] = [other.order, t.order]; return t; }
           if (data.lane === 'today' && t.lane !== 'today' && state.tasks.filter(x => x.lane === 'today' && !x.deleted && !done(x, date)).length >= 3) throw fail('Your shortlist is full. Move one task to your inbox first.');
-          Object.assign(t, taskInput(data, t)); return t;
+          const updated = taskInput(data,t);validatePeople(state,updated.personIds);Object.assign(t, updated); return t;
         }
-        if (p === '/api/blocks' && req.method === 'POST') { const b = blockInput(data); state.blocks.push(b); return b; }
+        if (p === '/api/blocks' && req.method === 'POST') { const b = blockInput(data);validatePeople(state,b.personIds);if(data.socialPlan&&!b.personIds.length)throw fail('Choose at least one person for this plan.');assignBlockColor(b,state.blocks); state.blocks.push(b); return b; }
         if (p === '/api/blocks/skip') { const b = state.blocks.find(b => b.id === data.id); if (!b) throw fail('Block not found.', 404); if (!schedule(state,date).some(x=>x.id===b.id)) throw fail('This occurrence was not found.'); b.excludedDates = [...new Set([...(b.excludedDates || []), date])]; return {ok:true}; }
         if (p === '/api/blocks/feedback') { if (!state.blocks.some(b => b.id === data.id)) throw fail('Block not found.', 404); state.blockFeedback ||= {}; state.blockFeedback[date + ':' + data.id] = Boolean(data.completed); return { ok: true }; }
         const blockMatch = p.match(/^\/api\/blocks\/([^/]+)$/);
-        if (blockMatch) { const b = state.blocks.find(b => b.id === blockMatch[1]); if (!b) throw fail('Block not found.', 404); if('expectedVersion' in data&&Number(data.expectedVersion)!==(b.editVersion||0))throw fail('This block changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409); if (req.method === 'DELETE') { state.blocks = state.blocks.filter(x => x.id !== b.id); return { ok: true }; } Object.assign(b, blockInput(data, b)); return b; }
+        if (blockMatch) { const b = state.blocks.find(b => b.id === blockMatch[1]); if (!b) throw fail('Block not found.', 404); if('expectedVersion' in data&&Number(data.expectedVersion)!==(b.editVersion||0))throw fail('This block changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409); if (req.method === 'DELETE') { state.blocks = state.blocks.filter(x => x.id !== b.id); return { ok: true }; } const updated=blockInput(data,b);validatePeople(state,updated.personIds);assignBlockColor(updated,state.blocks.filter(x=>x.id!==b.id));Object.assign(b,updated); return b; }
         if (p === '/api/schedule/shift') { const shift = finite(data.minutes, -120, 120, 15); for (const b of state.blocks.filter(b => b.date === date && b.mode === 'relative')) b.shift += shift; return { ok: true }; }
         if (p === '/api/day/wake') { state.wake[date] = Date.now(); return { ok: true }; }
         if (p === '/api/day/end') { for (const t of state.tasks.filter(t => t.lane === 'today' && !t.completed)) t.lane = 'inbox'; state.checkins[date] = { ...state.checkins[date], reflection: String(data.reflection || '').slice(0, 2000), ended: true }; return { ok: true }; }
@@ -181,7 +196,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           if ('ollamaModel' in data) s.ollamaModel = String(data.ollamaModel).slice(0, 100);
           return { ok: true };
         }
-        if (p === '/api/import') { await save(); await copyFile(file, path.join(dataDir, `before-import-${Date.now()}.json`)); const imported=legacyImport(data,state); imported.workspaceId=state.workspaceId; if(imported.engagement)imported.engagement=engagementInput(imported.engagement); if(imported.feelings){if(!Array.isArray(imported.feelings))throw fail('Backup feelings must be a list.'); imported.feelings=imported.feelings.slice(-60).map(f=>feelingInput(f,imported));} state=imported; return { ok: true }; }
+        if (p === '/api/import') { await save(); await copyFile(file, path.join(dataDir, `before-import-${Date.now()}.json`)); const imported=legacyImport(data,state); imported.workspaceId=state.workspaceId; if(imported.engagement)imported.engagement=engagementInput(imported.engagement); if(imported.feelings){if(!Array.isArray(imported.feelings))throw fail('Backup feelings must be a list.'); imported.feelings=imported.feelings.slice(-60).map(f=>feelingInput(f,imported));} normalizeSocial(imported);for(const block of imported.blocks)assignBlockColor(block,imported.blocks.filter(b=>b!==block));state=imported; return { ok: true }; }
         if (p === '/api/calendar/config') { const parsed = data.url ? new URL(data.url) : null; if (parsed && !['https:', 'http:'].includes(parsed.protocol)) throw fail('Use an HTTP or HTTPS calendar URL.'); state.calendar.url = String(data.url || '').slice(0, 2000); state.calendar.username = String(data.username || '').slice(0, 300); if (data.password) state.calendar.password = String(data.password).slice(0, 500); return { ok: true }; }
         throw fail('This action was not found.', 404);
       });
@@ -190,6 +205,8 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     if (req.method !== 'GET') throw fail('Method not supported.', 405);
     const assets = { '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/domain.js': ['domain.js', 'text/javascript'], '/engagement.js': ['engagement.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
     assets['/calendar.js'] = ['calendar.js', 'text/javascript'];
+    assets['/social.js'] = ['social.js', 'text/javascript'];
+    assets['/social-domain.js'] = ['social-domain.js', 'text/javascript'];
     for(const file of ['icon-192.png','icon-512.png','apple-touch-icon.png'])assets['/'+file]=[file,'image/png'];
     if (!assets[p]) throw fail('Page not found.', 404);
     const [asset, type] = assets[p]; const content = await readFile(path.join(root, 'public', asset));

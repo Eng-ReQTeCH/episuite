@@ -2,6 +2,18 @@
 
 A single workspace for tasks, habits, time blocks, focus, ideas and optional rewards. Built alongside the original apps, which are unchanged.
 
+## People, plans, and repeat habits
+
+The [release judge review](SOCIAL-JUDGE.md) records the walkthrough defects, fixes, and final scoped self-review score of **9.9/10**. Regression, browser, PWA installability and offline checks back the assessment; physical-phone installation and long-term outcomes have not been measured.
+
+**Social** keeps people in any number of circles. Save notes and contact details, choose a check-in rhythm (or disable it), and record real conversations with dates and notes. Search by person or notes and filter by circle. A check-in task goes into your inbox; completing it updates Social history, and undoing it removes that linked entry. Open person details to edit or remove records and review history. Removing a circle keeps its people; removing a person unlinks existing tasks and plans instead of deleting them.
+
+**Plans together** are ordinary calendar commitments linked to people: they appear in Social, Calendar, Now, the watch day feed, backups, and calendar exports/sync. They support recurring weekdays, locations, notes, accent colors, and reminders. Existing commitments and blocks can also be linked to people from their editor. Progress includes a seven-day record of check-ins without a streak or penalty. Social is a private planner; it does not send messages or invite other users.
+
+**Calendar colors** are assigned automatically and stored, so renaming a block or moving between views preserves its accent. Change the accent in any block/commitment editor using a preset or custom picker. Names and times remain readable independently of color. Exports include color metadata; external calendars decide whether to display it.
+
+**Twice-daily habits** wait six hours after a completion before returning to Now or the suggested-action picker. Choose a different minimum gap in the task editor (zero allows immediate repeats). The shortlist shows progress and the next eligible time. You can still explicitly record another completion, and **Undo last** reverses a partial completion and its reward. Eligibility resets for the next local calendar day; fully completed tasks stay complete for that day.
+
 ## A rewarding daily loop
 
 Now puts one real action first. **Start 2-minute burst** immediately starts its timer and opens quiet focus. Check off a tiny step, park an interruption, pause, or finish early; actual invested minutes are saved. Finishing offers a free break. A persistent session receipt keeps your effort visible and lets you leave a next move for your return.
@@ -43,6 +55,21 @@ The named volume **episuite_episuite-data** keeps tasks, settings, captures, gui
 Copy .env.example to .env if you want another port, bind address or initial timezone. Changes to timezone after first startup belong in Settings. Upgrade with docker compose up --build -d. Restart with docker compose restart. docker compose down keeps the volume; **down -v removes the saved workspace**. Export a JSON backup from Settings before upgrades, and keep a copy away from the server. Stop the container before taking a raw volume snapshot. Imports also write a recovery file into the data volume.
 
 Tasks and timers work over plain HTTP on a LAN. App installation and service-worker offline caching require HTTPS, except on localhost. Settings → Add to my home screen explains installation or bookmarking. PNG phone icons and an Apple touch icon are included. See the [MDN service-worker requirements](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers).
+
+### Install on your phone with Tailscale
+
+For testing, `http://elysium:3210` and `http://192.168.1.113:3210` support the connected app. Those addresses use plain HTTP and cannot provide the full phone PWA/offline experience. When ready for production, run this on **elysium**, where Tailscale and Episuite are running:
+
+```sh
+tailscale serve --bg http://127.0.0.1:3210
+tailscale serve status
+```
+
+Use the **HTTPS `.ts.net` address printed by that command** on your phone. Tailscale Serve stays private to your tailnet and provisions HTTPS; it may ask you to enable HTTPS in the tailnet. The exact hostname depends on your tailnet. See the [official Serve documentation](https://tailscale.com/docs/features/tailscale-serve). On a PC running Tailscale, use that same HTTPS address even while on the home network. You can also continue using the LAN IP for connected PC access to the same server data, but browser caches and offline queues belong to each address separately. Do not alternate addresses before queued offline captures have synced.
+
+On Android, choose **More → Install Episuite** or the browser's Install app menu. On iPhone/iPad, open the HTTPS address in Safari, choose **Share → Add to Home Screen**, and leave **Open as Web App** enabled if shown. More → Install Episuite also reports the connection and offline-cache status. The manifest uses standalone mode and includes PNG icons and an Apple touch icon. Browser installation UI varies by platform; see [MDN's installability guide](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
+
+The service worker caches all page modules and icons. When offline, the app reopens your last saved workspace; Capture queues notes and syncs them when the server returns. Shared edits and timers still need the server. In-app commitment reminders need an open app, and closed-app alarms remain the responsibility of an exported/synced calendar. Installation/offline behavior has been verified in a disposable Chrome profile and a phone-sized browser viewport, not on a physical iPhone or Android device.
 
 Docker is not installed in this development environment, so the container itself has **not** been executed. The image/Compose configuration was reviewed, and the underlying Node server was tested with two independent browser origins, restart persistence, concurrent requests and stale controls.
 

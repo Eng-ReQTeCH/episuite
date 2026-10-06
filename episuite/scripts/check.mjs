@@ -19,4 +19,11 @@ for (const file of ['public/index.html', 'public/styles.css', 'public/app.js', '
   if (!(await stat(path.join(root, file))).size) throw new Error(`Empty asset: ${file}`);
 }
 JSON.parse(await readFile(path.join(root, 'public/manifest.webmanifest')));
+const manifest=JSON.parse(await readFile(path.join(root,'public/manifest.webmanifest')));
+if(!manifest.id||manifest.start_url!=='/'||manifest.scope!=='/'||manifest.display!=='standalone')throw Error('PWA manifest is incomplete');
+for(const size of ['192x192','512x512'])if(!manifest.icons.some(i=>i.sizes===size&&i.type==='image/png'))throw Error('Missing install icon '+size);
+for(const file of ['public/social.js','public/social-domain.js'])if(!(await stat(path.join(root,file))).size)throw Error('Missing Social asset');
+const sw=await readFile(path.join(root,'public/sw.js'),'utf8'),assetList=JSON.parse(sw.match(/const ASSETS = (\[[^;]+\]);/)[1].replace(/'/g,'"'));
+if(new Set(assetList).size!==assetList.length)throw Error('Duplicate service-worker cache URLs');
+for(const asset of assetList)if(asset!=='/'&&!(await stat(path.join(root,'public',asset.slice(1)))).size)throw Error('Missing offline asset '+asset);
 console.log('Episuite source checks passed');

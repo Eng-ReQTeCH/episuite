@@ -111,6 +111,46 @@ kbd,.kbd{font:11px Consolas,monospace;padding:3px 6px;border:1px solid var(--lin
 .calendar-event {display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;font:inherit;font-size:.78rem;padding:9px;margin-bottom:7px;color:inherit;background:var(--surface,#fff);border:1px solid var(--line);border-radius:7px;cursor:pointer;overflow-wrap:anywhere}
 .calendar-event strong {font-weight:600}
 .commitment-event {border-left:3px solid var(--accent,#316b57)}
+.calendar-event {border-left:3px solid var(--event-color,var(--accent));background:color-mix(in srgb,var(--event-color,var(--accent)) 7%,var(--surface))}
+.commitment-event {border-left-color:var(--event-color,var(--accent))}
+.commitment-row {border-left:3px solid var(--event-color,var(--accent));padding-left:14px}
+.timeblock .block {border-left:4px solid var(--event-color,var(--accent))}
+.color-field input[type=color] {width:48px;min-width:48px;height:42px;padding:3px;cursor:pointer}
+.color-field select {flex:1}
+.habit-waiting {color:var(--muted);font-weight:600}
+.social-summary {display:flex;flex-wrap:wrap;gap:16px 30px;padding:20px 0;margin-bottom:20px;border-bottom:1px solid var(--line)}
+.social-summary span {font-size:13px;color:var(--muted)}
+.social-summary strong {font-size:22px;margin-right:6px;color:var(--ink)}
+.social-layout {display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:30px;align-items:start}
+.social-circles {display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 22px}
+.social-circle {display:flex;align-items:center;border-left:3px solid var(--event-color);padding-left:5px;gap:1px}
+.social-circle .btn.text {padding-left:8px;padding-right:8px}
+.social-people {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}
+.person-card {border:1px solid var(--line);border-radius:13px;padding:20px;background:var(--surface);min-width:0}
+.person-card .task-title {font-size:18px;font-weight:600}
+.person-card .row:first-child {align-items:flex-start;gap:10px;flex-wrap:wrap}
+.person-card p {margin:8px 0}
+.person-card > .row:last-child {margin-top:16px;gap:7px}
+.social-person-circles {margin:10px 0}
+.circle-chip {padding:3px 8px;border-radius:20px;font-size:12px;border:1px solid color-mix(in srgb,var(--event-color) 40%,var(--line));background:color-mix(in srgb,var(--event-color) 10%,var(--surface));color:var(--ink)}
+.person-note {white-space:pre-wrap;overflow-wrap:anywhere;max-height:5.5em;overflow:hidden}
+.person-next-plan {background:none;border:0;color:var(--accent);font:inherit;font-size:13px;text-align:left;cursor:pointer;margin:10px 0;padding:0}
+.social-aside {border:1px solid var(--line);border-radius:13px;padding:22px;background:var(--surface);min-width:0}
+.social-no-plans {padding:28px 0;color:var(--muted)}
+.social-plan {border-left:3px solid var(--event-color);padding:14px 0 14px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.social-plan > div {min-width:0}
+.social-plan > .btn {flex-shrink:0}
+.social-select {padding:14px;border:1px solid var(--line);border-radius:8px;display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.social-select label {display:flex;align-items:center;gap:6px;font-size:14px}
+.social-select input {width:auto}
+.checkin-history {padding:12px 0;border-bottom:1px solid var(--line)}
+.social-now {border:1px solid var(--line);border-radius:13px;padding:22px;margin:25px 0;background:var(--surface)}
+.social-now > .row {padding:8px 0;gap:12px}
+.phone-menu {display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.installation-status {padding:14px;background:var(--soft);border:1px solid var(--line);border-radius:9px;margin:18px 0}
+.installation-status p {margin:6px 0}
+@media(max-width:1150px){.social-people {grid-template-columns:1fr}}
+@media(max-width:800px){.social-layout {grid-template-columns:1fr;gap:20px}.person-card {padding:18px}.social-plan {flex-wrap:wrap}.phone-dock {grid-template-columns:repeat(6,minmax(0,1fr))!important}.phone-dock button {font-size:10px;min-width:0;padding-left:3px;padding-right:3px}.social-now {padding:18px}.social-summary {gap:12px 20px}.social-select {max-height:220px;overflow-y:auto}}
 .calendar-clash {display:block;color:var(--danger);margin-bottom:8px}
 .calendar-agenda {grid-template-columns:1fr}
 .calendar-agenda .calendar-cell {min-height:0;display:grid;grid-template-columns:160px 1fr;gap:12px}

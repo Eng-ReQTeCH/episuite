@@ -10,7 +10,7 @@ export class InputError extends Error { constructor(message) { super(message); t
 export const dateKey = (time = Date.now(), zone = 'Africa/Cairo') => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(time));
 export const addDays = (date, days) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export function initialState() {
-  return { version: 1, revision: 0, tasks: [], blocks: [], templates: [], sessions: [], events: [], notes: [],
+  return { version: 1, revision: 0, tasks: [], blocks: [], templates: [], sessions: [], events: [], notes: [], social: {circles:[],people:[],checkins:[]},
     categories: ['Personal', 'Work', 'Health', 'Learning', 'Home'],
     settings: { name: '', timezone: 'Africa/Cairo', theme: 'light', focusMinutes: 25, shortBreak: 5, longBreak: 15, cycles: 4, partialThreshold: 90, sound: true, volume: .25, gamification: true, reducedMotion: false, lowStim: false, autoBreak: false, dailyGoal: 2, accent: '#316b57', timerFont: 'sans', background: '', ollamaModel: 'llama3.2' },
     coins: 0, earned: 0, legacyFocus: 0, legacyCompleted: 0, legacyDays: {}, purchases: [],
@@ -25,7 +25,10 @@ export function taskInput(input, existing = {}) {
   if (!/^(none|daily|weekly|interval_\d+(\.\d+)?)$/.test(repeat) || (repeat.startsWith('interval_') && Number(repeat.slice(9)) <= 0)) throw new InputError('Choose a valid repeat interval.');
   const due = input.due ?? existing.due ?? '';
   if (due && !validDate(due)) throw new InputError('Choose a valid due date.');
+  const minimumGapMinutes = Number(input.minimumGapMinutes ?? existing.minimumGapMinutes ?? (repeat.startsWith('interval_') && Number(repeat.slice(9)) < 1 ? 360 : 0));
+  if (!Number.isInteger(minimumGapMinutes) || minimumGapMinutes < 0 || minimumGapMinutes > 1440) throw new InputError('Choose a gap between 0 and 1440 minutes.');
   return { ...existing, id: existing.id ? String(existing.id) : uid(), title, description: String(input.description ?? existing.description ?? '').slice(0, 3000),
+    minimumGapMinutes, personIds: Array.isArray(input.personIds) ? [...new Set(input.personIds.map(String))].slice(0,50) : existing.personIds || [], socialContact: Boolean(existing.socialContact),
     category: String(input.category ?? existing.category ?? 'Personal').slice(0, 50), minutes: finite(input.minutes ?? existing.minutes, 1, 480, 15),
     energy: ['low', 'medium', 'high'].includes(input.energy ?? existing.energy) ? (input.energy ?? existing.energy) : 'medium',
     difficulty: finite(input.difficulty ?? existing.difficulty, 1, 3, 1), repeat, target: finite(input.target ?? existing.target, 1, 20, repeat.startsWith('interval_') ? Math.max(1, Math.round(1 / Number(repeat.slice(9)))) : 1),
@@ -36,18 +39,23 @@ export function taskInput(input, existing = {}) {
 export function validDate(date) { return /^\d{4}-\d{2}-\d{2}$/.test(String(date)) && !Number.isNaN(Date.parse(date)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) === date; }
 export function countToday(task, date) { return (task.history?.[date] || []).length; }
 export function done(task, date) { return task.repeat === 'none' ? task.completed : countToday(task, date) >= task.target; }
-export function isDue(task, date) {
+export function nextEligibleAt(task, date) {
+  if (!task.repeat.startsWith('interval_') || Number(task.repeat.slice(9)) >= 1 || !countToday(task,date) || done(task,date)) return null;
+  const last = Math.max(...(task.history?.[date] || []).map(e=>Number(e.at)||0));
+  return last + (task.minimumGapMinutes ?? 360) * 60000;
+}
+export function isDue(task, date, now = Date.now()) {
   if (task.deleted || done(task, date)) return false;
   if (task.due && task.due > date) return false;
   if (task.repeat === 'none' || task.repeat === 'daily') return true;
   const days = task.repeat === 'weekly' ? 7 : Number(task.repeat.slice(9));
-  if (days < 1) return true;
+  if (days < 1) return (nextEligibleAt(task,date) ?? 0) <= now;
   const dates = Object.keys(task.history || {}).filter(d => task.history[d].length).sort();
   return !dates.length || date >= addDays(dates.at(-1), days);
 }
-export function chooseNext(state, date, energy = 'medium') {
+export function chooseNext(state, date, energy = 'medium', now = Date.now()) {
   const rank = { low: 0, medium: 1, high: 2 };
-  return state.tasks.filter(t => t.lane === 'today' && isDue(t, date)).sort((a, b) => {
+  return state.tasks.filter(t => t.lane === 'today' && isDue(t, date, now)).sort((a, b) => {
     const score = t => (t.due && t.due <= date ? -100 : 0) + Math.max(0, rank[t.energy] - rank[energy]) * 40 + t.minutes + (t.order / 1e14);
     return score(a) - score(b);
   })[0] || null;
@@ -69,6 +77,11 @@ export function toggleCompletion(state, id, date) {
   state.coins += coins; state.earned += coins;
   return coins;
 }
+export function undoLastCompletion(state,id,date) {
+  const task=state.tasks.find(t=>t.id===id&&!t.deleted);if(!task)throw new InputError('This task was not found.');
+  const entries=task.history?.[date];if(!entries?.length)throw new InputError('There is no completion to undo today.');
+  const entry=entries.pop();state.coins-=Number(entry.coins||0);state.earned=Math.max(0,state.earned-Number(entry.coins||0));task.completed=false;return -Number(entry.coins||0);
+}
 export function blockInput(input, existing = {}) {
   const name = String(input.name ?? existing.name ?? '').trim().slice(0, 120);
   const date = input.date ?? existing.date;
@@ -89,13 +102,30 @@ export function blockInput(input, existing = {}) {
   if (commitment && mode !== 'fixed') throw new InputError('Commitments need a fixed start time.');
   const excludedDates = input.excludedDates ?? existing.excludedDates ?? [];
   if (!Array.isArray(excludedDates) || excludedDates.some(d=>!validDate(d))) throw new InputError('Skipped dates must be valid dates.');
+  const color = String(input.color ?? existing.color ?? '');
+  if (color && !/^#[0-9a-f]{6}$/i.test(color)) throw new InputError('Choose a valid accent color.');
   return { ...existing, id: existing.id || uid(), name, date, mode, start, offset: finite(input.offset ?? existing.offset, 0, 1425, 0),
+    color, personIds: Array.isArray(input.personIds) ? [...new Set(input.personIds.map(String))].slice(0,50) : existing.personIds || [],
     commitment, endDate, weekdays: [...new Set(weekdays.map(Number))].sort(), reminderMinutes: reminder === null || reminder === '' ? null : Number(reminder),
     location: String(input.location ?? existing.location ?? '').slice(0, 300), description: String(input.description ?? existing.description ?? '').slice(0, 3000),
     excludedDates: [...new Set(excludedDates)].sort(),
     duration: finite(input.duration ?? existing.duration, 5, 480, 30), shift: existing.shift || 0,
     repeat,
     taskIds: Array.isArray(input.taskIds) ? input.taskIds.map(String).slice(0, 50) : existing.taskIds || [], kind: input.kind === 'break' ? 'break' : input.kind === 'focus' ? 'focus' : existing.kind || 'focus' };
+}
+export const calendarPalette = ['#3156ce','#9b3b83','#177a68','#b56419','#7053b4','#b33e4e','#287c9b','#6b7730'];
+export function blockColor(block, blocks = []) {
+  if (/^#[0-9a-f]{6}$/i.test(block.color || '')) return block.color;
+  // Creation order remains stable across dates, names and views. Stored colors survive deletions.
+  const index = blocks.findIndex(b=>b.id === block.id);
+  return calendarPalette[(index < 0 ? 0 : index) % calendarPalette.length];
+}
+export function assignBlockColor(block, blocks) {
+  if (block.color) return block;
+  const counts = calendarPalette.map(color=>blocks.filter(b=>blockColor(b,blocks)===color).length);
+  if(Math.min(...counts)===0)block.color = calendarPalette[counts.indexOf(0)];
+  else {let index=blocks.length;do {const hue=(index++*137.508)%360,s=.6,l=.4;const channel=n=>{const k=(n+hue/30)%12;return Math.round(255*(l-s*Math.min(l,1-l)*Math.max(-1,Math.min(k-3,9-k,1)))).toString(16).padStart(2,'0');};block.color='#'+channel(0)+channel(8)+channel(4);}while(blocks.some(b=>b.color===block.color));}
+  return block;
 }
 export function blockOnDate(block, date) {
   if (date < block.date || (block.endDate && date > block.endDate) || block.excludedDates?.includes(date)) return false;
@@ -258,7 +288,7 @@ export function calendarText(state, date, endDate = date) {
   const events = calendarDates(date, endDate).flatMap(date => schedule(state, date).filter(b => b.startMinute !== null).map(b => [
     'BEGIN:VEVENT', `UID:${b.id}-${date}@episuite`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`,
     `DTSTART;TZID=${state.settings.timezone}:${stamp(date, b.startMinute)}`, `DTEND;TZID=${state.settings.timezone}:${stamp(date, b.endMinute)}`,
-    `SUMMARY:${escape(b.name)}`, `LOCATION:${escape(b.location || '')}`, `DESCRIPTION:${escape([b.description, ...b.taskIds.map(id => state.tasks.find(t => t.id === id)?.title)].filter(Boolean).join('\n'))}`,
+    `SUMMARY:${escape(b.name)}`, `COLOR:${blockColor(b,state.blocks)}`, `LOCATION:${escape(b.location || '')}`, `DESCRIPTION:${escape([b.description, ...(b.personIds || []).map(id => state.social?.people.find(p => p.id === id)).filter(Boolean).map(p => 'With: ' + p.name), ...b.taskIds.map(id => state.tasks.find(t => t.id === id)?.title)].filter(Boolean).join('\n'))}`,
     ...(b.reminderMinutes == null ? [] : ['BEGIN:VALARM', `TRIGGER:-PT${b.reminderMinutes}M`, 'ACTION:DISPLAY', `DESCRIPTION:${escape(b.name)}`, 'END:VALARM']), 'END:VEVENT'
   ]));
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Episuite//EN', 'CALSCALE:GREGORIAN', ...events.flat(), 'END:VCALENDAR'].join('\r\n') + '\r\n';
