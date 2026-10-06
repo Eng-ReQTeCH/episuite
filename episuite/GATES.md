@@ -22,5 +22,5 @@ Scope: Deliver calendar colors, spaced repeat suggestions, connected social plan
 - [x] G4: Judge reviews observed flows, fixes defects, and documents a rubric score at least 9.9 without claiming independent user research.
   EVIDENCE: SOCIAL-JUDGE.md records 9.4 and 9.7 passes, corrected defects, inspected desktop/phone light/dark screenshots, and a final scoped self-review of 9.9. This is a manual assessment; physical-phone and production-tailnet verification remain explicitly outside observed evidence.
 
-- [ ] G5: Update is committed and pushed; remote branch points to the local commit.
-  EVIDENCE: pending
+- [x] G5: Update is committed and pushed; remote branch points to the local commit.
+  EVIDENCE: Release commit cf42b2bb7eee29554393459a5ff44881407ff960 was pushed to origin/main. git ls-remote origin refs/heads/main matched git rev-parse HEAD, and git status was clean. This evidence-only follow-up records the completed release.
