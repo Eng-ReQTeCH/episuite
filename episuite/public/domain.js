@@ -60,9 +60,17 @@ export function chooseNext(state, date, energy = 'medium', now = Date.now()) {
     return score(a) - score(b);
   })[0] || null;
 }
-export function toggleCompletion(state, id, date) {
+function rememberCompletionRolls(task) {
+  task.rewardRolls ||= {};
+  for(const [date,entries] of Object.entries(task.history||{}))for(const [index,entry] of entries.entries()){
+    const key=entry.rollKey||`${task.repeat==='none'?'once':date}:${index}`;
+    task.rewardRolls[key] ||= {baseCoins:entry.baseCoins??entry.coins,coins:entry.coins,rewardTier:entry.rewardTier||'fixed'};
+  }
+}
+export function toggleCompletion(state, id, date, awardTask) {
   const task = state.tasks.find(t => t.id === id && !t.deleted);
   if (!task) throw new InputError('This task was not found.');
+  rememberCompletionRolls(task);
   if (done(task, date)) {
     const entry = task.repeat === 'none' ? Object.values(task.history).flat().at(-1) : task.history[date].at(-1);
     const day = task.repeat === 'none' ? Object.keys(task.history).find(d => task.history[d].includes(entry)) : date;
@@ -70,8 +78,12 @@ export function toggleCompletion(state, id, date) {
     task.completed = false;
     return -Number(entry?.coins || 0);
   }
-  const coins = [0, 5, 10, 20][Math.round(task.difficulty)] || 5;
-  const entry = { id: uid(), at: Date.now(), coins };
+  const rollKey = `${task.repeat === 'none' ? 'once' : date}:${countToday(task,date)}`;
+  task.rewardRolls ||= {};
+  const baseCoins=[0,5,10,20][Math.round(task.difficulty)]||5;
+  const award = task.rewardRolls[rollKey] ||= awardTask ? awardTask(baseCoins) : {baseCoins,coins:baseCoins,rewardTier:'fixed'};
+  const { coins } = award;
+  const entry = { id: uid(), at: Date.now(), rollKey, ...award };
   (task.history[date] ||= []).push(entry);
   if (task.repeat === 'none') task.completed = true;
   state.coins += coins; state.earned += coins;
@@ -79,6 +91,7 @@ export function toggleCompletion(state, id, date) {
 }
 export function undoLastCompletion(state,id,date) {
   const task=state.tasks.find(t=>t.id===id&&!t.deleted);if(!task)throw new InputError('This task was not found.');
+  rememberCompletionRolls(task);
   const entries=task.history?.[date];if(!entries?.length)throw new InputError('There is no completion to undo today.');
   const entry=entries.pop();state.coins-=Number(entry.coins||0);state.earned=Math.max(0,state.earned-Number(entry.coins||0));task.completed=false;return -Number(entry.coins||0);
 }
@@ -198,9 +211,11 @@ export function finishTimer(state, now = Date.now(), early = false) {
   const minutes = Math.floor(seconds / 60);
   const credited = t.mode === 'focus' && minutes > 0;
   const full = seconds >= t.duration * state.settings.partialThreshold / 100;
-  const coins = credited ? Math.max(1, Math.round(minutes * .4)) : 0;
   const finishedAt = !early && t.deadline && now >= t.deadline ? t.deadline : now;
-  const session = { id: t.id, date: dateKey(finishedAt, state.settings.timezone), at: finishedAt, taskId: t.taskId, mode: t.mode, minutes, full, coins };
+  const baseCoins = credited ? Math.max(1, Math.round(minutes * .4)) : 0;
+  const award = { baseCoins, coins: baseCoins, rewardTier: 'fixed' };
+  const { coins } = award;
+  const session = { id: t.id, date: dateKey(finishedAt, state.settings.timezone), at: finishedAt, taskId: t.taskId, mode: t.mode, minutes, full, ...award };
   state.sessions.push(session); state.coins += coins; state.earned += coins; state.timer = null; return session;
 }
 export function metrics(state, date) {
@@ -230,7 +245,8 @@ export function legacyImport(payload, current) {
     }
     for (const reward of state.rewards) {
       if (!reward || typeof reward.id !== 'string' || !String(reward.name || '').trim()) throw new InputError('Backup contains an invalid reward.');
-      reward.cost = finite(reward.cost, 1, 100000, 20); reward.minutes = finite(reward.minutes, 0, 120, 0);
+      if(reward.kind && !['personal','screentime'].includes(reward.kind))throw new InputError('Backup contains an invalid reward type.');
+      reward.cost = finite(reward.cost, 1, 100000, 20); reward.minutes = finite(reward.minutes, reward.kind==='screentime'?1:0, reward.kind==='screentime'?1440:120, 0);
     }
     for (const key of ['wake', 'checkins', 'legacyDays']) if (!state[key] || typeof state[key] !== 'object' || Array.isArray(state[key])) throw new InputError(`Backup ${key} must be an object.`);
     state.timer = null; state.redemption = null; return state;
@@ -278,7 +294,7 @@ function normalizeHistory(history) {
     const date = key === '__once__' ? value.date : key;
     if (!validDate(date)) continue;
     const entries = Array.isArray(value) ? value : Array.isArray(value?.completions) ? value.completions : [value];
-    result[date] = entries.map(e => ({ id: e?.id || uid(), at: Number(e?.at) || Date.parse(`${date}T12:00:00Z`), coins: finite(e?.coins, 0, 1000, 0) }));
+    result[date] = entries.map(e => ({ id: e?.id || uid(), at: Number(e?.at) || Date.parse(`${date}T12:00:00Z`), coins: finite(e?.coins, 0, 1e9, 0) }));
   }
   return result;
 }

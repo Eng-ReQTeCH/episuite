@@ -162,3 +162,4 @@ kbd,.kbd{font:11px Consolas,monospace;padding:3px 6px;border:1px solid var(--lin
 .commitment-days label {display:flex;gap:6px;align-items:center}
 .commitment-days input {width:auto}
 @media(max-width:800px){.calendar-month,.calendar-week {min-width:770px}.commitment-row {flex-direction:column}.commitments-panel {padding:16px}.calendar-agenda .calendar-cell {grid-template-columns:1fr}.calendar-agenda .calendar-cell .calendar-event {grid-column:1}}
+.payout-odds{width:100%;border-collapse:collapse;margin:16px 0;text-align:left;font-size:.9rem}.payout-odds caption{text-align:left;color:var(--muted);padding-bottom:8px}.payout-odds th,.payout-odds td{padding:8px 10px;border-bottom:1px solid var(--line)}.payout-odds th:last-child,.payout-odds td:last-child{text-align:right}.reward [data-screentime-key]{width:100%;min-width:0;margin:10px 0 14px;font-family:Consolas,monospace;font-size:.85rem}

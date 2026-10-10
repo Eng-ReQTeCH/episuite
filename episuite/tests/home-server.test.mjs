@@ -40,7 +40,7 @@ test('stale edits and duplicated completion from another device cannot overwrite
   assert.equal((await post(`/api/tasks/${t.id}`,{title:'PC version',expectedVersion:t.editVersion},'PATCH')).status,200);
   const stale=await post(`/api/tasks/${t.id}`,{title:'Stale phone version',expectedVersion:t.editVersion},'PATCH');assert.equal(stale.status,409);assert.equal(stale.state.tasks[0].title,'PC version');
   const latest=(await get()).state.tasks[0];const results=await Promise.all([post(`/api/tasks/${t.id}/complete`,{expectedVersion:latest.editVersion}),post(`/api/tasks/${t.id}/complete`,{expectedVersion:latest.editVersion})]);
-  assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);assert.equal((await get()).state.tasks[0].completed,true);assert.equal((await get()).state.coins,5);
+  assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);assert.equal((await get()).state.tasks[0].completed,true);const awarded=results.find(r=>r.status===200).result.delta;assert.ok(Number.isInteger(awarded)&&awarded>0);assert.equal((await get()).state.coins,awarded);
   const current=(await get()).state.tasks[0];assert.equal((await post(`/api/tasks/${t.id}/complete`,{expectedVersion:current.editVersion})).status,200);assert.equal((await get()).state.coins,0);
 }));
 test('bulk day/category changes invalidate stale task editors; time blocks also protect drafts',async()=>workspace(async({get,post})=>{

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
 const dir = await mkdtemp(path.join(tmpdir(), 'episuite-test-'));
-let app = await createApp({ dataDir: dir });
+let app = await createApp({ dataDir: dir, rewardRandom:()=>0 });
 await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
 let base = `http://127.0.0.1:${app.server.address().port}`;
 async function call(endpoint, data, method = 'POST', headers = {}) {
