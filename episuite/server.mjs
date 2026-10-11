@@ -64,7 +64,11 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     if (!validDate(date)) throw fail('Choose a valid date.');
     const expectedOrigin = `http://${req.headers.host}`;
     if (req.headers.origin && req.headers.origin !== expectedOrigin && req.headers.origin !== expectedOrigin.replace('http:', 'https:')) throw fail('Use Episuite from its own address.', 403);
-    if (req.headers['sec-fetch-site'] === 'cross-site') throw fail('Cross-site requests are blocked.', 403);
+    // Installed-app launches can be cross-site navigations. Only the public
+    // HTML entry points may bypass this check; workspace APIs remain protected.
+    const shellNavigation = req.method === 'GET' && ['/', '/index.html'].includes(p)
+      && req.headers['sec-fetch-mode'] === 'navigate' && req.headers['sec-fetch-dest'] === 'document';
+    if (req.headers['sec-fetch-site'] === 'cross-site' && !shellNavigation) throw fail('Cross-site requests are blocked.', 403);
     if (req.method === 'GET' && p === '/api/state') {
       await queue;
       const currentDay = dateKey(Date.now(), state.settings.timezone);
