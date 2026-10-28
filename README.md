@@ -1,6 +1,6 @@
 # Episuite
 
-One personal productivity workspace, shared by your phone, laptop and PC through your home server. The current app lives in **episuite/**. Earlier versions in **EpiApps/**, **EpiAppsTest/** and **epiblock/** are retained as source references.
+One personal productivity workspace, shared by your phone, laptop and PC through your home server. The app lives in **episuite/**.
 
 See [the app guide](episuite/README.md) for onboarding, functionality, backups and optional integrations.
 
