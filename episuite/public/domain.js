@@ -38,6 +38,12 @@ export function taskInput(input, existing = {}) {
 }
 export function validDate(date) { return /^\d{4}-\d{2}-\d{2}$/.test(String(date)) && !Number.isNaN(Date.parse(date)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) === date; }
 export function countToday(task, date) { return (task.history?.[date] || []).length; }
+export function taskStreak(task, date) {
+  const active = countToday(task, date) > 0;
+  let current = 0, cursor = active ? date : addDays(date, -1);
+  while (countToday(task, cursor) > 0) { current++; cursor = addDays(cursor, -1); }
+  return {current, active};
+}
 export function done(task, date) { return task.repeat === 'none' ? task.completed : countToday(task, date) >= task.target; }
 export function nextEligibleAt(task, date) {
   if (!task.repeat.startsWith('interval_') || Number(task.repeat.slice(9)) >= 1 || !countToday(task,date) || done(task,date)) return null;
