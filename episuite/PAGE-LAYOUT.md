@@ -7,7 +7,7 @@ The layout review covers all ten main pages, populated and empty workspaces, des
 - **Today:** the next action and three-task shortlist come first. The idle timer is under **Choose a timer instead**. Progress, daily starters, thought parking, restart support, and social suggestions remain under **More for today**.
 - **Tasks:** six rows per page, with library-wide search and existing filters. Completion, title, streak, and one main action remain visible. **More (⋯)** contains History, Remove from today, reorder, and edit tools. Tap the task name to edit directly.
 - **Calendar:** phones open to Agenda. Empty agenda dates do not repeat down the screen. Month view fits the phone width with date targets and appointment counts; choose a date for full event details. Week view opens around today with a swipe cue. Export/sync, recurring commitments, reminders, and day routines have named optional sections.
-- **Social:** four compact people cards per page with check-in as the primary action. Notes, circles, plans, and task creation remain available through **Notes & more**, **Filter & manage circles**, and **Upcoming plans**. Search still covers all people.
+- **Social:** four compact people cards per page with check-in as the primary action. Notes, circles, plans, and task creation remain available through **Notes & more**, **Manage circles**, and **Upcoming plans**. Search still covers all people.
 - **Focus:** the clock and Start/Pause/Finish controls fit the initial phone view. Sound and saved-session details open separately. Thought parking, quiet view, floating mode, and task selection remain available.
 - **Capture:** capture remains first. Notes are searchable and shown four at a time, with paging for the rest.
 - **Progress:** real totals and the weekly chart lead. Growth/keepsakes, focus history, and reflections/support open separately.
@@ -16,3 +16,10 @@ The layout review covers all ten main pages, populated and empty workspaces, des
 - **LIFE OS:** its existing compact personal board and customization remain unchanged.
 
 These are presentation changes: existing tasks, histories, rewards, settings, and integrations remain in the same workspace. List pages and optional sections do not delete or archive records.
+
+
+Social now has an always-visible search and circle filter bar. **Manage circles** opens a separate screen for creating/editing circles; individual filters have no edit menus. Upload or remove each person’s picture in their editor; uploads are cropped to a 160px thumbnail, saved with the person, and included in backups. Initials appear when no picture is set.
+
+In **Settings → Mobile navigation**, select four different pages in the order you want. **More** remains the fifth dock button and exposes every page. Changes synchronize across devices.
+
+**Float timer** uses the browser’s standard video Picture-in-Picture window with a drawn timer, mode, and task. The native play/pause control also pauses/resumes the shared timer. **Interactive PiP** uses Document Picture-in-Picture for additional buttons. Both need browser support; HTTPS or localhost is recommended. Closing either floating view leaves the timer running. Keep the original tab open. Browser/OS restrictions can affect placement; native video PiP was verified in Chromium, not by physically switching foreground desktop applications.

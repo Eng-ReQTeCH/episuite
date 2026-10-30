@@ -9,12 +9,13 @@ export function circleInput(input,existing={}) {
 }
 export function personInput(input,existing={},social=emptySocial()) {
  if(!input||typeof input!=='object'||Array.isArray(input))throw new InputError('Choose a valid person.');
+ const photo=String(input.photo??existing.photo??'');if(photo&&(!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(photo)||photo.length>180000))throw new InputError('Choose a profile photo smaller than 130 KB.');
  const name=text(input.name??existing.name,120);if(!name)throw new InputError('Give this person a name.');
  const circleIds=input.circleIds??existing.circleIds??[];
  if(!Array.isArray(circleIds)||circleIds.some(id=>!social.circles.some(c=>c.id===id)))throw new InputError('Choose circles that exist.');
  const everyDays=Number(input.everyDays??existing.everyDays??14);if(!Number.isInteger(everyDays)||everyDays<0||everyDays>365)throw new InputError('Choose a check-in rhythm from 0 to 365 days.');
  const lastChecked=input.lastChecked??existing.lastChecked??'';if(lastChecked&&!validDate(lastChecked))throw new InputError('Choose a valid last check-in date.');
- return {...existing,id:existing.id||uid(),name,circleIds:[...new Set(circleIds)],everyDays,lastChecked,notes:text(input.notes??existing.notes,3000),contact:text(input.contact??existing.contact,300),created:existing.created||Date.now()};
+ return {...existing,id:existing.id||uid(),name,photo,circleIds:[...new Set(circleIds)],everyDays,lastChecked,notes:text(input.notes??existing.notes,3000),contact:text(input.contact??existing.contact,300),created:existing.created||Date.now()};
 }
 export function validatePeople(state,ids=[]) {
  if(!Array.isArray(ids)||ids.some(id=>!state.social.people.some(p=>p.id===id)))throw new InputError('Choose people who exist in Social.');
