@@ -154,3 +154,7 @@ node scripts/check.mjs
 All 51 tests passed after the home-server update. The tests use temporary directories and local HTTP mock services. They never read or modify your original app data. The inventory generator is `node scripts/audit.mjs`.
 
 Read [AUDIT.md](AUDIT.md) for source comparisons and feature decisions, and [USER-JUDGE.md](USER-JUDGE.md) for the simulated evaluation and revisions. The user judge score is a usability assessment by the building agent, not independent user research or a clinical efficacy result.
+
+## LIFE OS, simpler tasks, and automation
+
+See [LIFE-OS.md](LIFE-OS.md) for contribution histories, the unified task list, n8n completion setup, webapp shortcuts, and the floating focus/break timer. **All open** now shows every unfinished task; **Today** is a small selection from that same list. LIFE OS is available from the sidebar and phone More menu.

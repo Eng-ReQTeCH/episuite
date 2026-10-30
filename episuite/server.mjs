@@ -1,3 +1,5 @@
+import {normalizeLife,authorizeAutomation,rotateAutomation,completeAutomation} from './life-automation.mjs';
+import {shortcutInput} from './public/life.js';
 import {syncCalDAV} from './caldav.mjs';
 import http from 'node:http';
 import {rewardConfig, rewardDefaults} from './public/reward-events.js';
@@ -26,6 +28,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   const defaults = initialState();
   state = { ...defaults, ...state, settings: { ...defaults.settings, ...state.settings }, calendar: { ...defaults.calendar, ...state.calendar } };
   normalizeSocial(state);
+  normalizeLife(state);
   state.rewardEvents = {config:rewardConfig({},state.rewardEvents?.config||rewardDefaults)};
   normalizeScreenTime(state);
   state.notifications ||= {config:{...notificationDefaults},jobs:[]};
@@ -34,7 +37,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   let queue = Promise.resolve();
   const save = async () => { await writeFile(`${file}.tmp`, JSON.stringify(state, null, 2)); await rename(`${file}.tmp`, file); };
   if(!state.workspaceId){state.workspaceId=uid();await save();}
-  const safeState = () => { const result = structuredClone(state); result.screentime={outstanding:Object.keys(state.screentime.keys).length}; result.notifications = publicNotifications(result.notifications); result.calendar.password = ''; result.calendar.configured = Boolean(state.calendar.password); if (result.archivedLegacy) result.archivedLegacy = '[Preserved on server; available in export]'; return result; };
+  const safeState = () => { const result = structuredClone(state); result.automation={configured:Boolean(state.automation.token)}; result.screentime={outstanding:Object.keys(state.screentime.keys).length}; result.notifications = publicNotifications(result.notifications); result.calendar.password = ''; result.calendar.configured = Boolean(state.calendar.password); if (result.archivedLegacy) result.archivedLegacy = '[Preserved on server; available in export]'; return result; };
   const mutate = (operation, notify = true) => {
     const job = queue.then(async () => { const before = structuredClone(state); try {
       const result = await operation();
@@ -62,6 +65,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     const url = new URL(req.url, 'http://localhost'), p = url.pathname;
     const date = url.searchParams.get('date') || dateKey(Date.now(), state.settings.timezone);
     if (!validDate(date)) throw fail('Choose a valid date.');
+    if(p.startsWith('/api/automation/')&&p!=='/api/automation/token')authorizeAutomation(state,req.headers.authorization);
     const expectedOrigin = `http://${req.headers.host}`;
     if (req.headers.origin && req.headers.origin !== expectedOrigin && req.headers.origin !== expectedOrigin.replace('http:', 'https:')) throw fail('Use Episuite from its own address.', 403);
     // Installed-app launches can be cross-site navigations. Only the public
@@ -72,7 +76,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     if (req.method === 'GET' && p === '/api/state') {
       await queue;
       const currentDay = dateKey(Date.now(), state.settings.timezone);
-      if (state.lastOpenedDay !== currentDay) await mutate(() => {
+      if (state.lastOpenedDay !== currentDay || !state.life.visits[currentDay]) await mutate(() => {
         if (state.lastOpenedDay) {
           let kept = 0;
           for (const t of state.tasks.filter(t => t.lane === 'today' && !t.deleted)) {
@@ -80,6 +84,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
             else if (!done(t, currentDay) && ++kept > 3) t.lane = 'inbox';
           }
         }
+        state.life.visits[currentDay]=1;
         state.lastOpenedDay = currentDay;
       });
       if (state.timer?.status === 'running' && remaining(state.timer) === 0) {
@@ -100,11 +105,12 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
       if(req.headers['if-none-match']===etag){res.writeHead(304,{'Cache-Control':'no-store'});return res.end();}
       return json(res, safeState());
     }
+    if(req.method==='GET'&&p==='/api/automation/tasks'){await queue;return json(res,{date,tasks:state.tasks.filter(t=>!t.deleted).map(t=>({id:t.id,title:t.title,repeat:t.repeat,target:t.target,done:done(t,date),count:(t.history?.[date]||[]).length}))});}
     if (req.method === 'GET' && p === '/api/health') return json(res, { ok: true, app: 'episuite' });
     if (req.method === 'GET' && p === '/api/cosmetics') return json(res, cosmetics);
     if (req.method === 'GET' && p === '/api/export') {
       await queue;
-      const data = structuredClone(state); delete data.screentime; for(const purchase of data.purchases)if(purchase.kind==='screentime'){delete purchase.key;purchase.used=true;} data.notifications = publicNotifications(data.notifications); data.notifications.jobs = []; data.calendar.password = ''; if (data.archivedLegacy) {
+      const data = structuredClone(state); delete data.screentime; delete data.automation; for(const purchase of data.purchases)if(purchase.kind==='screentime'){delete purchase.key;purchase.used=true;} data.notifications = publicNotifications(data.notifications); data.notifications.jobs = []; data.calendar.password = ''; if (data.archivedLegacy) {
         // Legacy backups can contain credentials; never include them in a new backup.
         data.archivedLegacy = JSON.parse(JSON.stringify(data.archivedLegacy, (k, v) => /password|token|secret/i.test(k) ? undefined : v));
       }
@@ -131,6 +137,11 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         } catch { throw fail('Ollama is unavailable or returned an invalid response. You can add small steps yourself.', 503); }
       }
       const result = await mutate(async () => {
+        if(p==='/api/automation/token'&&req.method==='POST'){const token=data.disable?(state.automation={token:'',receipts:{}},null):rotateAutomation(state);return {token};}
+        if(p==='/api/automation/complete'&&req.method==='POST'){authorizeAutomation(state,req.headers.authorization);return completeAutomation(state,data,date,base=>coinAward(state,base,Date.now(),rewardRandom));}
+        if(p==='/api/life/shortcuts'&&req.method==='POST'){if(state.life.shortcuts.length>=100)throw fail('Keep up to 100 shortcuts. Remove one first.');const shortcut={id:uid(),...shortcutInput(data)};state.life.shortcuts.push(shortcut);return shortcut;}
+        const shortcutMatch=p.match(/^\/api\/life\/shortcuts\/([^/]+)$/);
+        if(shortcutMatch){const shortcut=state.life.shortcuts.find(s=>s.id===shortcutMatch[1]);if(!shortcut)throw fail('Shortcut not found.',404);if(req.method==='DELETE'){state.life.shortcuts=state.life.shortcuts.filter(s=>s.id!==shortcut.id);return {ok:true};}if(req.method!=='PATCH')throw fail('Use PATCH or DELETE.',405);Object.assign(shortcut,shortcutInput(data));return shortcut;}
         if(p==='/api/screentime/redeem'){if(req.method!=='POST')throw fail('Use POST to redeem a screentime key.',405);return redeemScreenTime(state,data.key);}
         if(p==='/api/reward-events/config'){state.rewardEvents.config=rewardConfig(data,state.rewardEvents.config);return {ok:true};}
         if(p==='/api/notifications/config'){state.notifications.config=notificationConfig(data,state.notifications.config);state.notifications.jobs=state.notifications.jobs.filter(j=>j.status!=='pending');return {ok:true};}
@@ -229,7 +240,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           if ('ollamaModel' in data) s.ollamaModel = String(data.ollamaModel).slice(0, 100);
           return { ok: true };
         }
-        if (p === '/api/import') { await save(); await copyFile(file, path.join(dataDir, `before-import-${Date.now()}.json`)); const imported=legacyImport(data,state); imported.workspaceId=state.workspaceId; imported.notifications=state.notifications; imported.rewardEvents={config:rewardConfig(data.rewardEvents?.config||{},state.rewardEvents.config)}; preserveScreenTime(imported,state); for(const reward of imported.rewards)Object.assign(reward,rewardInput(reward,reward)); if(imported.engagement)imported.engagement=engagementInput(imported.engagement); if(imported.feelings){if(!Array.isArray(imported.feelings))throw fail('Backup feelings must be a list.'); imported.feelings=imported.feelings.slice(-60).map(f=>feelingInput(f,imported));} normalizeSocial(imported);for(const block of imported.blocks)assignBlockColor(block,imported.blocks.filter(b=>b!==block));state=imported; return { ok: true }; }
+        if (p === '/api/import') { await save(); await copyFile(file, path.join(dataDir, `before-import-${Date.now()}.json`)); const imported=legacyImport(data,state); imported.workspaceId=state.workspaceId; imported.automation=state.automation; normalizeLife(imported); imported.life.shortcuts=imported.life.shortcuts.map(s=>({id:uid(),...shortcutInput(s)})); imported.notifications=state.notifications; imported.rewardEvents={config:rewardConfig(data.rewardEvents?.config||{},state.rewardEvents.config)}; preserveScreenTime(imported,state); for(const reward of imported.rewards)Object.assign(reward,rewardInput(reward,reward)); if(imported.engagement)imported.engagement=engagementInput(imported.engagement); if(imported.feelings){if(!Array.isArray(imported.feelings))throw fail('Backup feelings must be a list.'); imported.feelings=imported.feelings.slice(-60).map(f=>feelingInput(f,imported));} normalizeSocial(imported);for(const block of imported.blocks)assignBlockColor(block,imported.blocks.filter(b=>b!==block));state=imported; return { ok: true }; }
         if (p === '/api/calendar/config') { const parsed = data.url ? new URL(data.url) : null; if (parsed && !['https:', 'http:'].includes(parsed.protocol)) throw fail('Use an HTTP or HTTPS calendar URL.'); state.calendar.url = String(data.url || '').slice(0, 2000); state.calendar.username = String(data.username || '').slice(0, 300); if (data.password) state.calendar.password = String(data.password).slice(0, 500); return { ok: true }; }
         throw fail('This action was not found.', 404);
       },p!=='/api/import');
@@ -241,12 +252,14 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     assets['/calendar.js'] = ['calendar.js', 'text/javascript'];
     assets['/reward-events.js'] = ['reward-events.js', 'text/javascript'];
     assets['/reward-shop.js'] = ['reward-shop.js', 'text/javascript'];
+    assets['/life-tools.js'] = ['life-tools.js', 'text/javascript'];
+    assets['/life.js'] = ['life.js', 'text/javascript'];
     assets['/social.js'] = ['social.js', 'text/javascript'];
     assets['/social-domain.js'] = ['social-domain.js', 'text/javascript'];
     for(const file of ['icon-192.png','icon-512.png','apple-touch-icon.png'])assets['/'+file]=[file,'image/png'];
     if (!assets[p]) throw fail('Page not found.', 404);
     const [asset, type] = assets[p]; const content = await readFile(path.join(root, 'public', asset));
-    res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" }); res.end(content);
+    res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" }); res.end(content);
   }
   // CalDAV calls are kept outside the storage queue to avoid blocking normal task capture.
   const server = http.createServer((req, res) => {
