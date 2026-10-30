@@ -256,6 +256,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     assets['/calendar.js'] = ['calendar.js', 'text/javascript'];
     assets['/reward-events.js'] = ['reward-events.js', 'text/javascript'];
     assets['/reward-shop.js'] = ['reward-shop.js', 'text/javascript'];
+    assets['/calm-layout.js'] = ['calm-layout.js', 'text/javascript'];
     assets['/life-board.js'] = ['life-board.js', 'text/javascript'];
     assets['/life-tools.js'] = ['life-tools.js', 'text/javascript'];
     assets['/life.js'] = ['life.js', 'text/javascript'];
