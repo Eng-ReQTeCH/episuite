@@ -1,10 +1,22 @@
 # LIFE OS and completion automation
 
-Open **LIFE OS** from the sidebar or phone **More** menu. It shows dated contribution grids for tasks, habits, life-area categories (including hobbies), focus minutes, and app-opening days. Choose a year or find a task by name/category. Task histories expand individually, so a large task library does not mount hundreds of year grids at once. Individual squares have date/count labels; keyboard users can enter a grid once and use arrow keys. Deleted tasks with retained history still contribute. No streak or score penalizes time off.
+Open **LIFE OS** from the sidebar or phone **More** menu. It is a personal board, not a catalogue of every task. No contribution graphs are added automatically, including when upgrading from the original Life OS page.
 
-Opening days begin with this release: older login history cannot be reconstructed. Work days are dates with retained check-offs or positive focus minutes. Focus time and check-offs are separate measures, so a focus session is not presented as a completed task. Categories represent life areas; create habits for hobbies such as German or music to track them.
+Choose **Add graph**, search by task, habit, or life-area name, and select what you want. Overview options include all check-offs, focus minutes, and opening days. Save up to 24 pins; the board shows four at a time, four across on wide desktops and two across on phones, with page controls for additional pins. Each compact square-cell graph covers the latest twelve weeks. The arrow on a card opens full yearly history, including previous years. Keyboard users can enter a graph once and explore with arrow keys, Home, and End; tapping a square shows its date and count.
+
+**Edit** lets you reorder and remove pins. Removing a graph does not remove its task or history. **Customize** also lets you show or hide the daily flame, webapp shortcuts, and lifetime totals. Totals start hidden. Customize → Graph accent offers vibrant presets and a custom color picker with an intensity preview. The saved color applies to all compact contribution cards, full task histories, and legends in both themes. The default is vibrant emerald. Choices sync through the server, persist after restart, and travel in backups. Stale edits preserve the draft and ask you to reopen Customize.
+
+The daily flame counts consecutive workspace-local days with at least one check-off or one positive recorded focus minute. Opening the app alone does not count. Before recording work today, the flame is grayscale; a run through yesterday stays visible while waiting for today's work. The first recorded work lights it with a short ignition animation. Its size grows with the streak (up to a visual cap); a seven-day strip and personal best sit alongside it. The animation is acknowledged once per workspace/day on each browser, and respects reduced-motion and low-stimulation settings. Automation completions and synced focus sessions can light it too. Missing days begin a fresh streak; historical work and personal-best calculations are retained. Undoing or permanently deleting the only qualifying work for a day can change the streak.
+
+Opening days began with the original LIFE OS release; earlier login history cannot be reconstructed. Work totals use retained check-offs and positive focus minutes. Focus minutes and completed tasks remain separate measures.
 
 **Tasks → All open** is the default and contains every unfinished task, including legacy Inbox and Someday records. **Today** is a selection of up to three from that same list. **Remove from today** keeps the task in All open. Habits, Done, and Recently deleted are filters. Task-row **History** opens its contribution graph. Storage/API lane names remain compatible with existing backups and integrations.
+
+## Permanent task deletion
+
+Move a task to **Recently deleted**, then choose **Delete forever** and type `DELETE`. This removes the task and its completion history from the live workspace, removes its pinned graph, and unlinks calendar blocks, saved routines, focus sessions, the active timer, and social check-in bookkeeping. Actual recorded focus time, social conversations, and earned coins stay. This cannot be undone through Restore. Existing backup files and the preserved original legacy import are not rewritten; importing an older backup can restore older data.
+
+The endpoint is `DELETE /api/tasks/TASK_ID/purge` with JSON `{"confirmation":"DELETE","expectedVersion":CURRENT_TASK_EDIT_VERSION}`. It only accepts tasks already in Recently deleted. Missing confirmation, stale edits, and attempts on active tasks are rejected.
 
 ## n8n / Home Assistant / other automation
 

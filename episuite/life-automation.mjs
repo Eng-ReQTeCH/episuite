@@ -1,9 +1,15 @@
+import {boardInput,boardDefaults,graphSources} from './public/life-board.js';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {done,toggleCompletion,countToday,validDate} from './public/domain.js';
 import {syncContactCompletion} from './public/social-domain.js';
 export function normalizeLife(state){
  state.life||={};state.life.visits||={};state.life.shortcuts||=[];
  if(typeof state.life!=='object'||Array.isArray(state.life)||!Array.isArray(state.life.shortcuts)||state.life.shortcuts.length>100||typeof state.life.visits!=='object'||Array.isArray(state.life.visits)||Object.entries(state.life.visits).some(([d,n])=>!validDate(d)||n!==1))throw Object.assign(Error('Backup contains invalid Life OS data.'),{status:400});
+ const board=state.life.board||boardDefaults();
+ if(!Array.isArray(board.graphs))throw Object.assign(Error('Backup contains invalid graph choices.'),{status:400});
+ const available=new Set(graphSources(state).map(s=>s.id));
+ state.life.board=boardInput({...board,graphs:board.graphs.filter(id=>available.has(id))},state);
+ state.life.boardVersion=Number.isSafeInteger(state.life.boardVersion)?state.life.boardVersion:0;
  state.automation||={token:'',receipts:{}};state.automation.receipts||={};
 }
 export function authorizeAutomation(state,header){

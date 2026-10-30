@@ -158,3 +158,5 @@ Read [AUDIT.md](AUDIT.md) for source comparisons and feature decisions, and [USE
 ## LIFE OS, simpler tasks, and automation
 
 See [LIFE-OS.md](LIFE-OS.md) for contribution histories, the unified task list, n8n completion setup, webapp shortcuts, and the floating focus/break timer. **All open** now shows every unfinished task; **Today** is a small selection from that same list. LIFE OS is available from the sidebar and phone More menu.
+
+LIFE OS now starts with a personal, empty graph board: pin only the graphs you want, view compact twelve-week cards in a grid, and hide unwanted sections in Customize. A growing daily flame lights after today’s first real work. Recently deleted tasks also support permanent deletion with confirmation. See [LIFE-OS.md](LIFE-OS.md).

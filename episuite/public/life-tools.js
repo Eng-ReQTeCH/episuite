@@ -1,12 +1,22 @@
+import {boardPicker,graphSources,graphCounts} from './life-board.js';
+import {activity,heatmap} from './life.js';
 export function lifeTools({getState,request,render,showDialog,closeDialog,field,btn,esc,today,timeText,remaining,taskById,action}){
- let floating=null,signature='';
+ let floating=null,signature='',view={editing:false,boardPage:0};
+ const saveBoard=async graphs=>{await request('/api/life/board',{graphs,expectedBoardVersion:getState().life.boardVersion});render();};
  function update(){
   if(!floating||floating.closed)return;const state=getState(),t=state.timer,d=floating.document,key=JSON.stringify([t?.id,t?.status,t?.mode,t?.taskId]);
   if(key!==signature){signature=key;d.body.innerHTML=`<main class="float-content"><span class="eyebrow">${t?(t.mode==='focus'?'FOCUS':'BREAK'):'SESSION SAVED'}</span><h2>${esc(t?taskById(t.taskId)?.title||(t.mode==='focus'?'One thing at a time':'Time to recharge'):'Your work is kept')}</h2><div class="float-time" data-floating-time></div><p>${t?.status==='paused'?'Paused · resume when ready':t?'Synced with Episuite.':'Return when you are ready.'}</p><div class="row wrap">${t?btn(t.status==='paused'?'Resume':'Pause',t.status==='paused'?'resume':'pause','','primary')+btn('Finish','finish','','secondary'):btn('Start break','float-break','','primary')}${btn('Return to app','float-return','','text')}</div><p role="status" id="float-error"></p></main>`;}
   d.querySelector('[data-floating-time]').textContent=t?timeText(remaining(t)):'✓';d.body.classList.toggle('dark',document.body.classList.contains('dark'));
  }
  function setup(){const state=getState();showDialog('Connect an automation',`<p>Let n8n or another service record a check-off. The dedicated token only permits listing tasks and recording completions.</p><p>Status: <strong>${state.automation?.configured?'Token enabled':'Not connected'}</strong></p><ol><li>Create a token below and save it in n8n credentials.</li><li>Find your task ID below.</li><li>POST with a unique eventId. Keep that ID and the source event’s workspace date unchanged for retries, including after midnight.</li></ol><p><code>GET ${esc(location.origin)}/api/automation/tasks</code></p><p><code>POST ${esc(location.origin)}/api/automation/complete?date=YYYY-MM-DD</code></p><pre>Authorization: Bearer YOUR_TOKEN\nContent-Type: application/json\n\n{"taskId":"TASK_ID","eventId":"german-2026-10-30"}</pre><p>Each new event adds one check-off up to the daily target. Retries never undo work or pay twice. Use a new eventId for a second habit check-off.</p><div class="row wrap">${btn(state.automation?.configured?'Replace token…':'Create token','automation-token','','primary')}${state.automation?.configured?btn('Disable token…','automation-disable','','secondary'):''}</div><div id="automation-token-result" role="status"></div><details><summary>Task IDs</summary>${state.tasks.filter(t=>!t.deleted).map(t=>`<p>${esc(t.title)}<br><code>${esc(t.id)}</code></p>`).join('')||'<p>Create a task first.</p>'}</details>`);}
- async function handle(name,id){const state=getState();switch(name){
+ async function handle(name,id,element){const state=getState();switch(name){
+ case 'life-add': case 'life-customize':showDialog(name==='life-add'?'Choose your graphs':'Make this space yours',boardPicker(state,name==='life-customize'),'life-board','Save my board');return true;
+ case 'life-edit':view.editing=!view.editing;render();return true;
+ case 'life-page':view.boardPage=Math.max(0,Number(id)||0);render();document.querySelector('#tracking-title')?.scrollIntoView({block:'nearest'});return true;
+ case 'life-clear-selection':document.querySelectorAll('#dialog [name="graphs"]').forEach(input=>input.checked=false);document.querySelector('#board-selected-count').textContent='0 / 24 selected';return true;
+ case 'life-remove':await saveBoard(state.life.board.graphs.filter(source=>source!==id));return true;
+ case 'life-move':{const graphs=[...state.life.board.graphs],i=graphs.indexOf(id),direction=Number(element?.dataset.direction||0);if(i>=0&&graphs[i+direction]){[graphs[i],graphs[i+direction]]=[graphs[i+direction],graphs[i]];await saveBoard(graphs);}return true;}
+ case 'life-expand':{const source=graphSources(state).find(s=>s.id===id);if(!source)return true;const a=activity(state),counts=graphCounts(source,a),years=[...new Set([today().slice(0,4),...Object.keys(counts).map(d=>d.slice(0,4))])].sort().reverse();showDialog(source.name,`<p class="small muted">Full history · your board keeps the latest twelve weeks.</p><label>Year <select id="board-history-year" data-source="${esc(id)}">${years.map(y=>`<option>${y}</option>`).join('')}</select></label><div id="board-full-history">${heatmap(counts,today(),source.name,source.unit,today().slice(0,4)+'-01-01')}</div>`);return true;}
  case 'float-timer': {
   if(floating&&!floating.closed){floating.focus();return true;}
   if(!window.documentPictureInPicture?.requestWindow){showDialog('Keep the timer visible','<p>Always-on-top timers need Document Picture-in-Picture support, such as desktop Chrome or Edge, over HTTPS or localhost. Your browser or connection does not offer it.</p><p>Open your secure Episuite address in a supported desktop browser and choose Float timer.</p>');return true;}
@@ -24,5 +34,5 @@ export function lifeTools({getState,request,render,showDialog,closeDialog,field,
  case 'confirm-automation-token':{const r=await request('/api/automation/token',{});setup();document.querySelector('#automation-token-result').innerHTML=`<p>Copy now. This token is shown only once.</p><textarea aria-label="Automation token" readonly>${esc(r.result.token)}</textarea><p>Save in n8n credentials. Tokens are excluded from backups.</p>`;return true;}
  default:return false;
  }}
- return {handle,update,isOpen:()=>Boolean(floating&&!floating.closed)};
+ return {handle,update,view:()=>view,isOpen:()=>Boolean(floating&&!floating.closed)};
 }

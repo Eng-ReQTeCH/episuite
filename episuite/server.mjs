@@ -1,3 +1,5 @@
+import {purgeTask} from './task-purge.mjs';
+import {boardInput} from './public/life-board.js';
 import {normalizeLife,authorizeAutomation,rotateAutomation,completeAutomation} from './life-automation.mjs';
 import {shortcutInput} from './public/life.js';
 import {syncCalDAV} from './caldav.mjs';
@@ -139,6 +141,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
       const result = await mutate(async () => {
         if(p==='/api/automation/token'&&req.method==='POST'){const token=data.disable?(state.automation={token:'',receipts:{}},null):rotateAutomation(state);return {token};}
         if(p==='/api/automation/complete'&&req.method==='POST'){authorizeAutomation(state,req.headers.authorization);return completeAutomation(state,data,date,base=>coinAward(state,base,Date.now(),rewardRandom));}
+        if(p==='/api/life/board'&&req.method==='POST'){if(data.expectedBoardVersion!==state.life.boardVersion)throw fail('Your board changed on another device. Close and reopen Customize to load it.',409);state.life.board=boardInput(data,state,state.life.board);state.life.boardVersion++;return state.life.board;}
         if(p==='/api/life/shortcuts'&&req.method==='POST'){if(state.life.shortcuts.length>=100)throw fail('Keep up to 100 shortcuts. Remove one first.');const shortcut={id:uid(),...shortcutInput(data)};state.life.shortcuts.push(shortcut);return shortcut;}
         const shortcutMatch=p.match(/^\/api\/life\/shortcuts\/([^/]+)$/);
         if(shortcutMatch){const shortcut=state.life.shortcuts.find(s=>s.id===shortcutMatch[1]);if(!shortcut)throw fail('Shortcut not found.',404);if(req.method==='DELETE'){state.life.shortcuts=state.life.shortcuts.filter(s=>s.id!==shortcut.id);return {ok:true};}if(req.method!=='PATCH')throw fail('Use PATCH or DELETE.',405);Object.assign(shortcut,shortcutInput(data));return shortcut;}
@@ -170,11 +173,12 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           return state.onboarding;
         }
         if (p === '/api/tasks' && req.method === 'POST') { const task = taskInput(data); validatePeople(state,task.personIds); if (task.lane === 'today' && state.tasks.filter(t => t.lane === 'today' && !t.deleted && !done(t, date)).length >= 3) throw fail('Keep today small: move a task back to your inbox first.'); task.order = Math.max(0, ...state.tasks.map(t => t.order)) + 1; state.tasks.push(task); return task; }
-        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move|undo))?$/);
+        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move|undo|purge))?$/);
         if (taskMatch) {
           const [, id, action] = taskMatch, t = state.tasks.find(t => t.id === id);
           if (!t) throw fail('Task not found.', 404);
           if('expectedVersion' in data&&Number(data.expectedVersion)!==(t.editVersion||0))throw fail('This task changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409);
+          if(action==='purge'){if(req.method!=='DELETE')throw fail('Use DELETE for permanent deletion.',405);return purgeTask(state,id,data.confirmation);}
           if(action==='undo'){const delta=undoLastCompletion(state,id,date);syncContactCompletion(state,t);return {delta};}
           if (action === 'complete') {const delta=toggleCompletion(state,id,date,base=>coinAward(state,base,Date.now(),rewardRandom));syncContactCompletion(state,t);const award=delta>0?(t.repeat==='none'?Object.values(t.history).flat().at(-1):t.history[date]?.at(-1)):null;return {delta,award};}
           if (action === 'restore') { t.deleted = false; t.lane = 'inbox'; return t; }
@@ -252,6 +256,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     assets['/calendar.js'] = ['calendar.js', 'text/javascript'];
     assets['/reward-events.js'] = ['reward-events.js', 'text/javascript'];
     assets['/reward-shop.js'] = ['reward-shop.js', 'text/javascript'];
+    assets['/life-board.js'] = ['life-board.js', 'text/javascript'];
     assets['/life-tools.js'] = ['life-tools.js', 'text/javascript'];
     assets['/life.js'] = ['life.js', 'text/javascript'];
     assets['/social.js'] = ['social.js', 'text/javascript'];

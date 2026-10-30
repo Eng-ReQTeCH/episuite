@@ -1,0 +1,62 @@
+import {createRequire} from 'node:module';
+import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import assert from 'node:assert/strict';
+import {createApp} from '../server.mjs';
+import {initialState,taskInput,dateKey,addDays} from '../public/domain.js';
+let require=createRequire(import.meta.url),chromium;
+try{({chromium}=require('playwright'));}catch{require=createRequire('C:/Users/Monty/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/package.json');({chromium}=require('playwright'));}
+const dir=await mkdtemp(path.join(tmpdir(),'life-board-browser-')),state=initialState(),day=dateKey();
+state.onboarding={status:'complete',step:7};state.settings.sound=false;
+state.tasks=[['German study','Learning'],['Move my body','Health'],['Read a little','Learning'],['Make music','Hobbies'],['Personal project','Work']].map(([title,category],i)=>{
+ const task=taskInput({title,category,repeat:'daily'},{id:`habit-${i}`});
+ for(let j=1;j<84;j++)if(j<=6||(j>7&&((j*7+i*3)%11)<5))task.history[addDays(day,-j)]=[{id:`${i}-${j}`,at:Date.parse(addDays(day,-j)+'T12:00:00Z'),coins:0}];
+ return task;
+});
+state.tasks.push(...Array.from({length:45},(_,i)=>taskInput({title:`Unpinned task ${i+1}`})));
+state.life={visits:Object.fromEntries(Array.from({length:18},(_,i)=>[addDays(day,-i),1])),shortcuts:[{id:'german-app',name:'German companion',url:'https://deutsch.example.com/'},{id:'notes-app',name:'My notes',url:'https://notes.example.com/'}]};
+await writeFile(path.join(dir,'episuite.json'),JSON.stringify(state));
+const app=await createApp({dataDir:dir,backgroundInterval:0});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.server.address().port}`;
+const post=async(p,data)=>{const response=await fetch(base+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});assert.equal(response.status,200,await response.clone().text());return response.json();};
+const out=fileURLToPath(new URL('../test-results/',import.meta.url));await mkdir(out,{recursive:true});let browser;
+try{
+ browser=await chromium.launch({headless:true,executablePath:process.env.LIFE_BROWSER||'C:/Users/Monty/AppData/Local/ms-playwright/chromium-1248/chrome-win64/chrome.exe'});
+ const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
+ await context.route('**/favicon.ico',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28"><rect width="28" height="28" rx="6" fill="#80795d"/><text x="14" y="19" text-anchor="middle" fill="white" font-family="sans-serif" font-size="15">G</text></svg>'}));
+ await page.goto(base+'/#life');await page.locator('.ember-panel').waitFor();
+ assert.equal(await page.locator('.board-graph').count(),0);assert.equal(await page.locator('.task-history').count(),0);assert.equal(await page.locator('.board-totals').count(),0);
+ assert.equal(await page.locator('.ember-panel').getAttribute('data-active'),'false');assert.equal(await page.locator('.ember-panel').getAttribute('data-streak'),'6');
+ assert.match(await page.locator('.ember-flame').evaluate(el=>getComputedStyle(el).filter),/grayscale\(1\)/);
+ await page.locator('#main').focus();await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(out,'life-board-empty.png'),fullPage:true});
+ const save=async()=>{await page.locator('#dialog [type="submit"]').click();await page.locator('#dialog').waitFor({state:'hidden'});};
+ await page.locator('[data-action="life-add"]').first().click();
+ await page.locator('#board-source-search').fill('Unpinned task 45');assert.equal(await page.locator('.board-source:visible').count(),1);
+ await page.locator('#board-source-search').fill('');for(let i=0;i<4;i++)await page.locator(`[name="graphs"][value="task:habit-${i}"]`).check();await save();
+ await page.locator('.board-graph').first().waitFor();assert.equal(await page.locator('.board-graph').count(),4);assert.equal(await page.locator('.mini-cell').count(),336);
+ const columns=await page.locator('.board-graph').evaluateAll(nodes=>nodes.slice(0,2).map(n=>n.getBoundingClientRect().top));assert.equal(columns[0],columns[1],'Desktop graphs share a row');
+ await page.reload();await page.locator('.board-graph').first().waitFor();assert.equal(await page.locator('.board-graph').count(),4);
+ const cellShape=await page.locator('.mini-cell').first().boundingBox();assert.ok(Math.abs(cellShape.width-cellShape.height)<1,'Contribution days are squares');await page.locator('.mini-cell').last().focus();await page.keyboard.press('ArrowLeft');assert.equal(await page.locator('.mini-cell:focus').count(),1);
+ await page.locator('[data-action="life-edit"]').click();await page.locator('.board-graph').nth(1).locator('[data-direction="-1"]').click();await page.waitForFunction(()=>document.querySelector('.board-graph')?.dataset.graph==='task:habit-1');await page.locator('[data-action="life-edit"]').click();
+ await page.locator('.graph-expand').first().click();await page.locator('#board-full-history .heat-grid').waitFor();await page.locator('#dialog [data-action="close-dialog"]').click();
+ await page.locator('#main').focus();await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(out,'life-board-dormant-desktop.png'),fullPage:true});
+ await post('/api/tasks/habit-0/complete',{});await page.locator('.ember-panel.is-igniting').waitFor();assert.equal(await page.locator('.ember-panel').getAttribute('data-streak'),'7');
+ assert.match(await page.locator('.ember-flame').evaluate(el=>getComputedStyle(el).animationName),/ember-ignite/);
+ await page.locator('[data-action="life-edit"]').click();assert.equal(await page.locator('.is-igniting').count(),0);await page.locator('[data-action="life-edit"]').click();
+ await page.locator('#main').focus();await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(out,'life-board-desktop.png'),fullPage:true});
+ await page.locator('[data-action="life-customize"]').click();await page.screenshot({path:path.join(out,'life-board-customize-desktop.png'),fullPage:true});await page.locator('[name="showShortcuts"]').uncheck();await page.locator('[name="showTotals"]').check();await save();assert.equal(await page.locator('.board-apps').count(),0);assert.equal(await page.locator('.board-totals').count(),1);
+ await page.locator('[data-action="life-customize"]').click();await page.locator('[name="showShortcuts"]').check();await page.locator('[name="showTotals"]').uncheck();await page.locator('[name="graphs"][value="all"]').check();await save();assert.equal(await page.locator('.board-graph').count(),4);await page.locator('[data-action="life-page"][data-id="1"]').click();assert.equal(await page.locator('.board-graph').count(),1);await page.locator('[data-action="life-page"][data-id="0"]').click();
+ await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No phone overflow');
+ await page.locator('#main').focus();await page.evaluate(()=>window.scrollTo(0,0));await page.waitForFunction(()=>getComputedStyle(document.querySelector('#toast')).opacity==='0');await page.screenshot({path:path.join(out,'life-board-phone.png'),fullPage:true});await page.locator('[data-action="life-customize"]').click();await page.waitForFunction(()=>document.querySelector('#dialog').scrollTop===0);const saveBounds=await page.locator('#dialog [type="submit"]').boundingBox();assert.ok(saveBounds.y+saveBounds.height<=844,'Save board is visible without scrolling');await page.screenshot({path:path.join(out,'life-board-customize-phone.png'),fullPage:true});await page.locator('#dialog [data-action="close-dialog"]').first().click();
+ await post('/api/settings',{theme:'dark'});await page.reload();await page.locator('body.dark').waitFor();await page.locator('#main').focus();await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(out,'life-board-dark-phone.png'),fullPage:true});
+ await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await page.locator('.ember-flame').evaluate(el=>getComputedStyle(el).animationName),'none');
+ await page.locator('[data-action="life-customize"]').click();await page.locator('[data-action="graph-color-preset"][data-id="#3b82f6"]').click();assert.equal(await page.locator('[name="graphAccent"]').inputValue(),'#3b82f6');assert.equal(await page.locator('.graph-accent-preview .heat-3').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(59, 130, 246)');
+ await page.locator('[name="graphAccent"]').evaluate(el=>{el.value='#06b6d4';el.dispatchEvent(new Event('input',{bubbles:true}));});assert.equal(await page.locator('#graph-accent-value').innerText(),'#06b6d4');await save();assert.equal(app.getState().life.board.graphAccent,'#06b6d4');assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--graph-3').trim()),'#06b6d4');await page.reload();await page.locator('.board-graph').first().waitFor();assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--graph-3').trim()),'#06b6d4');
+ // A second browser observes server-saved choices rather than local-only preferences.
+ const other=await browser.newPage();await other.goto(base+'/#life');await other.locator('.board-graph').first().waitFor();assert.equal(await other.locator('.board-graph').count(),4);assert.equal(await other.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--graph-3').trim()),'#06b6d4');await other.close();
+ await post('/api/settings',{theme:'light'});await page.setViewportSize({width:1440,height:1000});
+ await page.locator('[data-action="nav"][data-id="tasks"]').first().click();const row=page.locator('.task-row').filter({hasText:'Personal project'});await row.locator('[data-action="edit-task"]').first().click();await page.locator('[data-action="delete-task"]').click();await page.locator('[data-action="task-tab"][data-id="deleted"]').click();
+ await page.locator('[data-action="purge-task"]').click();await page.locator('#f-confirmation').fill('no');await page.locator('#dialog [type="submit"]').click();assert.equal(await page.locator('#dialog').isVisible(),true);await page.locator('#f-confirmation').fill('DELETE');await save();assert.equal(app.getState().tasks.some(t=>t.id==='habit-4'),false);
+ assert.deepEqual(errors,[]);console.log('Personal Life OS browser checks passed');
+}finally{await browser?.close();await app.close();}
