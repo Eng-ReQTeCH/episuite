@@ -29,9 +29,9 @@ function taskMenus(main){
   }
 }
 function settings(main){
-  const groups=[['appearance','Appearance & accessibility'],['rhythm','Focus & breaks'],['feedback','Encouragement & rewards'],['phone','Phone notifications'],['data','Backups & categories'],['calendar','Calendar sync'],['tools','Background & local AI'],['help','Setup & help']];
+  const groups=[['appearance','Appearance & accessibility'],['mobile','Mobile navigation'],['rhythm','Focus & breaks'],['feedback','Encouragement & rewards'],['phone','Phone notifications'],['data','Backups & categories'],['calendar','Calendar sync'],['tools','Background & local AI'],['help','Setup & help']];
   const sections=[...main.querySelectorAll('.settings-panel,.guide-settings')];
-  const map={'Your space':'appearance','Your rhythm':'rhythm','Make progress feel good':'feedback','Random task payouts':'feedback','Phone notifications':'phone','Keep your data safe':'data','Calendar connection':'calendar','A little help getting started':'tools','Connect your watch':'help'};
+  const map={'Mobile navigation':'mobile','Your space':'appearance','Your rhythm':'rhythm','Make progress feel good':'feedback','Random task payouts':'feedback','Phone notifications':'phone','Keep your data safe':'data','Calendar connection':'calendar','A little help getting started':'tools','Connect your watch':'help'};
   sections.forEach(section=>section.dataset.settingsGroup=map[section.querySelector('h2')?.textContent]||'help');
   const label=text('label','Choose a settings section','settings-section-label'),select=document.createElement('select');select.id='settings-section';select.setAttribute('aria-label','Settings section');groups.forEach(([value,name])=>{const option=text('option',name);option.value=value;select.append(option);});select.value=settingsSection;label.append(select);main.querySelector('.page-heading').after(label);
   const prefs=main.querySelector('[data-form="settings"]');
@@ -60,7 +60,7 @@ export function applyCalmLayout(page, main, state){
   if(page==='social'){
     const list=main.querySelector('.social-people');if(list)bounded(list,':scope > .person-card','people',4);
     for(const card of main.querySelectorAll('.person-card')){const header=card.querySelector(':scope > .row'),actions=card.querySelector(':scope > .row:last-child');if(actions){const primary=actions.querySelector('[data-action="social-checkin"]'),due=header?.querySelector('.pill');if(primary)header.append(primary);const secondary=[...actions.children].filter(n=>n.dataset.action!=='social-checkin'),notes=[...card.querySelectorAll('.person-note')],circles=card.querySelector('.social-person-circles'),paragraphs=[...card.querySelectorAll(':scope > p')],nextPlan=card.querySelector('.person-next-plan');if(due&&paragraphs[0])paragraphs[0].append(text('span',' · check-in due','social-due-note'));fold(card,[circles,due,...paragraphs.slice(1),nextPlan,...notes,...secondary],'Notes & more','person-'+card.querySelector('[data-action="social-person"]').dataset.id);if(!actions.children.length)actions.remove();}}
-    const circles=main.querySelector('.social-circles');if(circles){const wrapper=circles.parentElement,heading=circles.previousElementSibling;fold(wrapper,[heading,circles],'Filter & manage circles','social-circles',true);}
+    const circles=main.querySelector('.social-circles');if(circles){circles.previousElementSibling?.remove();circles.classList.add('social-filter-bar');}
     const aside=main.querySelector('.social-aside');if(aside){const wrapper=aside.parentElement;fold(wrapper,[aside],'Upcoming plans','social-plans');}
   }
   if(page==='progress'){

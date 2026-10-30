@@ -1,9 +1,12 @@
 import {boardPicker,graphSources,graphCounts} from './life-board.js';
 import {activity,heatmap} from './life.js';
 export function lifeTools({getState,request,render,showDialog,closeDialog,field,btn,esc,today,timeText,remaining,taskById,action}){
+ let videoPip=null,pipCanvas=null;
  let floating=null,signature='',view={editing:false,boardPage:0};
  const saveBoard=async graphs=>{await request('/api/life/board',{graphs,expectedBoardVersion:getState().life.boardVersion});render();};
  function update(){
+  if(videoPip&&pipCanvas){const state=getState(),ctx=pipCanvas.getContext('2d'),t=state.timer;ctx.fillStyle='#20232d';ctx.fillRect(0,0,480,240);ctx.textAlign='center';ctx.fillStyle='#d2ed88';ctx.font='18px sans-serif';ctx.fillText(t?(t.mode==='focus'?'FOCUS':'BREAK'):'SESSION SAVED',240,38);ctx.fillStyle='#ffffff';ctx.font='bold 76px monospace';ctx.fillText(t?timeText(remaining(t)):'✓',240,135);ctx.font='17px sans-serif';ctx.fillStyle='#c5c9d3';ctx.fillText(t?.status==='paused'?'Paused':t?taskById(t.taskId)?.title?.slice(0,45)||'One thing at a time':'Your work is kept',240,192);}
+
   if(!floating||floating.closed)return;const state=getState(),t=state.timer,d=floating.document,key=JSON.stringify([t?.id,t?.status,t?.mode,t?.taskId]);
   if(key!==signature){signature=key;d.body.innerHTML=`<main class="float-content"><span class="eyebrow">${t?(t.mode==='focus'?'FOCUS':'BREAK'):'SESSION SAVED'}</span><h2>${esc(t?taskById(t.taskId)?.title||(t.mode==='focus'?'One thing at a time':'Time to recharge'):'Your work is kept')}</h2><div class="float-time" data-floating-time></div><p>${t?.status==='paused'?'Paused · resume when ready':t?'Synced with Episuite.':'Return when you are ready.'}</p><div class="row wrap">${t?btn(t.status==='paused'?'Resume':'Pause',t.status==='paused'?'resume':'pause','','primary')+btn('Finish','finish','','secondary'):btn('Start break','float-break','','primary')}${btn('Return to app','float-return','','text')}</div><p role="status" id="float-error"></p></main>`;}
   d.querySelector('[data-floating-time]').textContent=t?timeText(remaining(t)):'✓';d.body.classList.toggle('dark',document.body.classList.contains('dark'));
@@ -18,6 +21,15 @@ export function lifeTools({getState,request,render,showDialog,closeDialog,field,
  case 'life-move':{const graphs=[...state.life.board.graphs],i=graphs.indexOf(id),direction=Number(element?.dataset.direction||0);if(i>=0&&graphs[i+direction]){[graphs[i],graphs[i+direction]]=[graphs[i+direction],graphs[i]];await saveBoard(graphs);}return true;}
  case 'life-expand':{const source=graphSources(state).find(s=>s.id===id);if(!source)return true;const a=activity(state),counts=graphCounts(source,a),years=[...new Set([today().slice(0,4),...Object.keys(counts).map(d=>d.slice(0,4))])].sort().reverse();showDialog(source.name,`<p class="small muted">Full history · your board keeps the latest twelve weeks.</p><label>Year <select id="board-history-year" data-source="${esc(id)}">${years.map(y=>`<option>${y}</option>`).join('')}</select></label><div id="board-full-history">${heatmap(counts,today(),source.name,source.unit,today().slice(0,4)+'-01-01')}</div>`);return true;}
  case 'float-timer': {
+  if(document.pictureInPictureEnabled&&HTMLVideoElement.prototype.requestPictureInPicture){
+   if(document.pictureInPictureElement===videoPip&&videoPip)return true;
+   floating?.close();pipCanvas=document.createElement('canvas');pipCanvas.width=480;pipCanvas.height=240;videoPip=document.createElement('video');videoPip.muted=true;videoPip.playsInline=true;videoPip.srcObject=pipCanvas.captureStream(5);videoPip.style.cssText='position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';document.body.append(videoPip);update();
+   const cleanup=()=>{videoPip?.srcObject?.getTracks().forEach(t=>t.stop());videoPip?.remove();videoPip=null;pipCanvas=null;};
+   try{await videoPip.play();await videoPip.requestPictureInPicture();videoPip.addEventListener('leavepictureinpicture',cleanup,{once:true});videoPip.addEventListener('pause',()=>{if(videoPip&&document.pictureInPictureElement===videoPip&&getState().timer?.status==='running')action('pause').catch(()=>{});});videoPip.addEventListener('play',()=>{if(videoPip&&document.pictureInPictureElement===videoPip&&getState().timer?.status==='paused')action('resume').catch(()=>{});});return true;}catch(error){cleanup();throw Error('Your browser could not open video PiP. Try Interactive PiP, or desktop Chrome/Edge over HTTPS or localhost.');}
+  }
+  return handle('document-pip');
+ }
+ case 'document-pip': {
   if(floating&&!floating.closed){floating.focus();return true;}
   if(!window.documentPictureInPicture?.requestWindow){showDialog('Keep the timer visible','<p>Always-on-top timers need Document Picture-in-Picture support, such as desktop Chrome or Edge, over HTTPS or localhost. Your browser or connection does not offer it.</p><p>Open your secure Episuite address in a supported desktop browser and choose Float timer.</p>');return true;}
   floating=await window.documentPictureInPicture.requestWindow({width:360,height:350});signature='';const css=floating.document.createElement('link');css.rel='stylesheet';css.href=new URL('/styles.css',location.href).href;floating.document.head.append(css);floating.document.title='Episuite focus';let pending=false;
@@ -34,5 +46,5 @@ export function lifeTools({getState,request,render,showDialog,closeDialog,field,
  case 'confirm-automation-token':{const r=await request('/api/automation/token',{});setup();document.querySelector('#automation-token-result').innerHTML=`<p>Copy now. This token is shown only once.</p><textarea aria-label="Automation token" readonly>${esc(r.result.token)}</textarea><p>Save in n8n credentials. Tokens are excluded from backups.</p>`;return true;}
  default:return false;
  }}
- return {handle,update,view:()=>view,isOpen:()=>Boolean(floating&&!floating.closed)};
+ return {handle,update,view:()=>view,isOpen:()=>Boolean((floating&&!floating.closed)||videoPip)};
 }
