@@ -17,3 +17,13 @@ test('undo and partial habit completions update streaks without counting focus o
  toggleCompletion(state,task.id,'2026-10-30');assert.equal(task.history['2026-10-30'].length,2);
  task.history['2026-10-30']=[];assert.deepEqual(taskStreak(task,'2026-10-30'),{current:1,active:false});
 });
+
+test('scheduled rest days preserve every-other-day and weekly streaks',()=>{
+ const task={repeat:'interval_2',history:{'2026-11-01':[{}]}};
+ assert.deepEqual(taskStreak(task,'2026-11-02'),{current:1,active:false});
+ assert.deepEqual(taskStreak(task,'2026-11-03'),{current:1,active:false});
+ task.history['2026-11-03']=[{}];assert.deepEqual(taskStreak(task,'2026-11-03'),{current:2,active:true});
+ assert.equal(taskStreak(task,'2026-11-05').current,2);assert.equal(taskStreak(task,'2026-11-06').current,0);
+ task.history['2026-11-06']=[{}];assert.equal(taskStreak(task,'2026-11-06').current,1);
+ task.repeat='weekly';assert.equal(taskStreak(task,'2026-11-10').current,3);
+});

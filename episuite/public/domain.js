@@ -40,8 +40,11 @@ export function validDate(date) { return /^\d{4}-\d{2}-\d{2}$/.test(String(date)
 export function countToday(task, date) { return (task.history?.[date] || []).length; }
 export function taskStreak(task, date) {
   const active = countToday(task, date) > 0;
-  let current = 0, cursor = active ? date : addDays(date, -1);
-  while (countToday(task, cursor) > 0) { current++; cursor = addDays(cursor, -1); }
+  const interval = task.repeat === 'weekly' ? 7 : task.repeat?.startsWith('interval_') ? Math.max(1, Math.round(Number(task.repeat.slice(9)))) : 1;
+  const dates = Object.keys(task.history || {}).filter(d => validDate(d) && d <= date && countToday(task,d)>0).sort();
+  if(!dates.length || date > addDays(dates.at(-1),interval))return {current:0,active};
+  let current=1;
+  for(let i=dates.length-1;i>0;i--){if(dates[i]>addDays(dates[i-1],interval))break;current++;}
   return {current, active};
 }
 export function done(task, date) { return task.repeat === 'none' ? task.completed : countToday(task, date) >= task.target; }
@@ -56,7 +59,7 @@ export function isDue(task, date, now = Date.now()) {
   if (task.repeat === 'none' || task.repeat === 'daily') return true;
   const days = task.repeat === 'weekly' ? 7 : Number(task.repeat.slice(9));
   if (days < 1) return (nextEligibleAt(task,date) ?? 0) <= now;
-  const dates = Object.keys(task.history || {}).filter(d => task.history[d].length).sort();
+  const dates = Object.keys(task.history || {}).filter(d => d <= date && task.history[d].length).sort();
   return !dates.length || date >= addDays(dates.at(-1), days);
 }
 export function chooseNext(state, date, energy = 'medium', now = Date.now()) {
