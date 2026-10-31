@@ -229,6 +229,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         }
         if (p === '/api/settings') {
           const s = state.settings;
+          if('calendarPastStyle' in data){if(!['gray','cross'].includes(data.calendarPastStyle))throw fail('Choose gray or X for past calendar days.');s.calendarPastStyle=data.calendarPastStyle;}
           if('mobilePages' in data){const allowed=['life','now','tasks','plan','social','focus','capture','progress','rewards'];if(!Array.isArray(data.mobilePages)||data.mobilePages.length!==4||new Set(data.mobilePages).size!==4||data.mobilePages.some(id=>!allowed.includes(id)))throw fail('Choose four different mobile pages.');s.mobilePages=data.mobilePages;}
           for (const key of ['sound', 'gamification', 'reducedMotion', 'lowStim', 'autoBreak']) if (key in data) s[key] = Boolean(data[key]);
           for (const key of ['focusMinutes', 'shortBreak', 'longBreak']) if (key in data) s[key] = finite(data[key], 1, 120, s[key]);

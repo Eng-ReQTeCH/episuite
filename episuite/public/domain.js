@@ -12,7 +12,7 @@ export const addDays = (date, days) => new Date(Date.parse(`${date}T12:00:00Z`) 
 export function initialState() {
   return { version: 1, revision: 0, tasks: [], blocks: [], templates: [], sessions: [], events: [], notes: [], social: {circles:[],people:[],checkins:[]},
     categories: ['Personal', 'Work', 'Health', 'Learning', 'Home'],
-    settings: { name: '', timezone: 'Africa/Cairo', theme: 'light', focusMinutes: 25, shortBreak: 5, longBreak: 15, cycles: 4, partialThreshold: 90, sound: true, volume: .25, gamification: true, reducedMotion: false, lowStim: false, autoBreak: false, dailyGoal: 2, accent: '#316b57', timerFont: 'sans', background: '', ollamaModel: 'llama3.2' },
+    settings: { calendarPastStyle:'gray', name: '', timezone: 'Africa/Cairo', theme: 'light', focusMinutes: 25, shortBreak: 5, longBreak: 15, cycles: 4, partialThreshold: 90, sound: true, volume: .25, gamification: true, reducedMotion: false, lowStim: false, autoBreak: false, dailyGoal: 2, accent: '#316b57', timerFont: 'sans', background: '', ollamaModel: 'llama3.2' },
     coins: 0, earned: 0, legacyFocus: 0, legacyCompleted: 0, legacyDays: {}, purchases: [],
     rewards: [{ id: 'tea', name: 'A good cup of tea', cost: 15, minutes: 10 }, { id: 'episode', name: 'An episode of something good', cost: 50, minutes: 25 }],
     redemption: null, timer: null, wake: {}, checkins: {}, blockFeedback: {}, calendar: { url: '', username: '', password: '', eventUrls: {} }, archivedLegacy: null };
