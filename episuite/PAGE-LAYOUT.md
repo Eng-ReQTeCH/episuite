@@ -23,3 +23,8 @@ Social now has an always-visible search and circle filter bar. **Manage circles*
 In **Settings → Mobile navigation**, select four different pages in the order you want. **More** remains the fifth dock button and exposes every page. Changes synchronize across devices.
 
 **Float timer** uses the browser’s standard video Picture-in-Picture window with a drawn timer, mode, and task. The native play/pause control also pauses/resumes the shared timer. **Interactive PiP** uses Document Picture-in-Picture for additional buttons. Both need browser support; HTTPS or localhost is recommended. Closing either floating view leaves the timer running. Keep the original tab open. Browser/OS restrictions can affect placement; native video PiP was verified in Chromium, not by physically switching foreground desktop applications.
+
+
+Profile photo uploads now open an inline crop editor. Zoom, rotate with the slider or 90° buttons, and drag to reposition; horizontal/vertical sliders support keyboard adjustment. **Use photo** applies a 160px thumbnail; **Cancel crop** keeps the previous photo. The person form cannot save an unfinished crop.
+
+For recurring tasks, **All open** shows only currently eligible habits. **Habits** retains every routine on rest days. Interval/weekly streaks count consecutive scheduled check-offs: Sunday and Tuesday on an every-two-days habit produce a streak of two, without Monday breaking it. The streak remains valid through the next due day and resets after that day is missed. Daily routines still count consecutive calendar days. A partial check-off counts as recorded activity, consistent with the existing daily flame. Calendar cells and event tints are now brighter, while saved event colors remain intact.
