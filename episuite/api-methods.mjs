@@ -1,6 +1,6 @@
 const getRoutes = new Set([
   '/api/state', '/api/health', '/api/cosmetics', '/api/export',
-  '/api/calendar.ics', '/api/v1/day', '/api/automation/tasks', '/api/books/search'
+  '/api/calendar.ics', '/api/v1/day', '/api/automation/tasks', '/api/books/search', '/api/backups'
 ]);
 const postRoutes = new Set([
   '/api/ai/breakdown', '/api/day/priority', '/api/weekly-review',
@@ -14,17 +14,21 @@ const postRoutes = new Set([
   '/api/notes', '/api/notes/convert', '/api/notes/delete', '/api/categories', '/api/rewards',
   '/api/rewards/delete', '/api/rewards/buy', '/api/redeem/start', '/api/redeem/stop', '/api/quests/claim',
   '/api/cosmetics/equip', '/api/settings', '/api/import', '/api/calendar/config',
-  '/api/calendar/sync', '/api/calendar/delete', '/api/books', '/api/reading/task'
+  '/api/calendar/sync', '/api/calendar/delete', '/api/books', '/api/reading/task', '/api/projects', '/api/operations', '/api/backups/create'
 ]);
 
 export function assertApiMethod(path, method) {
   let allowed;
   if (getRoutes.has(path)) allowed = ['GET'];
   else if (postRoutes.has(path)) allowed = ['POST'];
+  else if (/^\/api\/backups\/snapshot-[a-f0-9-]+\.json\/verify$/.test(path)) allowed = ['POST'];
+  else if (/^\/api\/backups\/snapshot-[a-f0-9-]+\.json$/.test(path)) allowed = ['GET'];
+  else if (/^\/api\/books\/[^/]+\/logs\/[^/]+$/.test(path)) allowed = ['PATCH', 'DELETE'];
+  else if (/^\/api\/projects\/[^/]+$/.test(path)) allowed = ['PATCH', 'DELETE'];
   else if (/^\/api\/books\/[^/]+\/log$/.test(path)) allowed = ['POST'];
   else if (/^\/api\/books\/[^/]+$/.test(path)) allowed = ['PATCH', 'DELETE'];
   else if (/^\/api\/tasks\/[^/]+\/purge$/.test(path)) allowed = ['DELETE'];
-  else if (/^\/api\/tasks\/[^/]+\/(complete|restore|move|undo|habit)$/.test(path)) allowed = ['POST'];
+  else if (/^\/api\/tasks\/[^/]+\/(complete|restore|move|undo|habit|history)$/.test(path)) allowed = ['POST'];
   else if (/^\/api\/(tasks|blocks|social\/people|social\/circles|life\/shortcuts)\/[^/]+$/.test(path)) allowed = ['PATCH', 'DELETE'];
   else if (/^\/api\/rewards\/[^/]+$/.test(path)) allowed = ['PATCH'];
   if (allowed && !allowed.includes(method)) {

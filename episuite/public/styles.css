@@ -234,6 +234,17 @@ body.dark .heat-cell.heat-1,body.dark .mini-cell.heat-1,body.dark .graph-accent-
 /* Workspace-local past/today markers; overlays never intercept calendar controls. */
 .calendar-cell{position:relative}.past-days-gray .calendar-cell.is-past{background:color-mix(in srgb,var(--line) 42%,var(--bg));filter:grayscale(1)}.past-days-gray .calendar-cell.is-past>.calendar-event{opacity:.72}.past-days-cross .calendar-cell.is-past::after{content:'';position:absolute;inset:3px;pointer-events:none;z-index:1;background:linear-gradient(to top right,transparent calc(50% - 1px),var(--muted) 50%,transparent calc(50% + 1px)),linear-gradient(to bottom right,transparent calc(50% - 1px),var(--muted) 50%,transparent calc(50% + 1px));opacity:.22}.calendar-cell.is-today{box-shadow:inset 0 0 0 2px var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--surface))}.calendar-today-label{display:inline-block;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:600;border-radius:4px;padding:2px 6px;margin:0 0 5px 4px}.calendar-cell.is-today .calendar-date{font-weight:750;color:var(--accent)}body.dark .calendar-cell.is-today{background:color-mix(in srgb,var(--accent) 15%,var(--surface))}body.dark .past-days-gray .calendar-cell.is-past{background:color-mix(in srgb,var(--line) 30%,var(--bg))}@media(max-width:700px){.calm-month .calendar-today-label{display:block;width:max-content;margin:0 auto 3px;font-size:9px;padding:1px 3px}.calm-month .is-today .calendar-date{min-height:34px}}
 /* Planning and focus tools share the existing panels and spacing. */
+.projects-panel { margin-block: 24px; }
+.project-card { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.project-card p, .project-card details { margin-block: 10px; }
+.project-card details summary { cursor: pointer; }
+.draft-recovered { margin-bottom: 16px; }
+.capture-bar:has(.draft-recovered) { flex-wrap: wrap; }
+.capture-bar > .draft-recovered { flex: 0 0 100%; }
+.draft-recovered details { margin-block: 10px; overflow-wrap: anywhere; }
+#habit-weekdays { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; border: 1px solid var(--line); }
+#habit-weekdays input, [data-form=book-task] input[type=checkbox], [data-form=backup-settings] input[type=checkbox], [data-form=book-save] input[type=checkbox] { width: auto; }
+.book-library-controls { display: grid; gap: 10px; margin-block: 12px; }
 .books-panel { margin-block: 24px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: var(--surface); }
 .books-panel .board-section-heading { gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .book-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }

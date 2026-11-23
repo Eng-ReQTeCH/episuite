@@ -1,4 +1,4 @@
-import { addDays, done, InputError, isDue, validDate } from './domain.js';
+import { addDays, done, InputError, validDate, taskAvailable } from './domain.js';
 
 export const focusConditions = [['usual', 'Usual audio'], ['quiet', 'Speech-free']];
 
@@ -57,5 +57,5 @@ export function normalizeProductivity(state) {
 
 export function duePriority(state, date) {
   const task = dayPriority(state, date);
-  return task && isDue(task, date) ? task : null;
+  return task && taskAvailable(state, task, date) ? task : null;
 }

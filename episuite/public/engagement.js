@@ -1,4 +1,4 @@
-import {metrics, isDue, InputError} from './domain.js';
+import {metrics, InputError, taskAvailable} from './domain.js';
 export const goalOptions=[['focus2','Make a start',2,'focus'],['task1','One useful win',1,'task'],['focus10','Find a rhythm',10,'focus']];
 export function engagementInput(input={},current={}){
   if(!input||typeof input!=='object'||Array.isArray(input))throw new InputError('Choose valid encouragement preferences.');
@@ -17,7 +17,7 @@ export function momentum(state,date){
 }
 export function pickAction(state,date,energy='medium',exclude=[]){
   const rank={low:0,medium:1,high:2};
-  return state.tasks.filter(t=>!exclude.includes(t.id)&&!t.deleted&&t.lane!=='later'&&isDue(t,date)).sort((a,b)=>{
+  return state.tasks.filter(t=>!exclude.includes(t.id)&&!t.deleted&&t.lane!=='later'&&taskAvailable(state,t,date)).sort((a,b)=>{
     const score=t=>(t.due&&t.due<=date?-1000:0)+(t.lane==='today'?-100:0)+Math.max(0,rank[t.energy]-rank[energy])*30+t.minutes;
     return score(a)-score(b);
   })[0]||null;

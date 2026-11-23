@@ -1,6 +1,7 @@
 # Personal workspace data and recovery backups
 **/data/
 **/test-results/
+**/backups/
 *.db
 *.db-shm
 *.db-wal

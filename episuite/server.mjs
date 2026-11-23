@@ -15,7 +15,12 @@ import { backupMaxBytes, readJson, writeWorkspace } from './workspace-storage.mj
 import { advanceExpiredTimer } from './timer-service.mjs';
 import { assertApiMethod } from './api-methods.mjs';
 import { createBookSearch } from './book-search.mjs';
-import { bookInput, normalizeReading, logReading, updateReadingTask } from './public/books-domain.js';
+import { normalizeProjects, projectMutation, validateTaskProject, reconcileProjectLinks } from './public/projects.js';
+import { bookInput, normalizeReading, logReading, editReadingLog, updateReadingTask } from './public/books-domain.js';
+import { applyOperation } from './public/operations.js';
+import { correctTaskHistory } from './public/activity-history.js';
+import { portableState } from './portable-state.mjs';
+import { createBackups } from './backups.mjs';
 import { normalizeProductivity, reviewInput, setPriority, dayPriority, weekStart } from './public/productivity.js';
 import { countToday, isDue, habitRestCount, addDays } from './public/domain.js';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +32,7 @@ import { initialState, dateKey, uid, taskInput, blockInput, toggleCompletion, st
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
-export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || path.join(root, 'data'), aiUrl = process.env.EPISUITE_OLLAMA_URL || 'http://127.0.0.1:11434/api/generate', notificationFetch = fetch, bookFetch = fetch, rewardRandom, backgroundInterval = 30000, watchToken = process.env.EPISUITE_WATCH_TOKEN } = {}) {
+export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || path.join(root, 'data'), aiUrl = process.env.EPISUITE_OLLAMA_URL || 'http://127.0.0.1:11434/api/generate', notificationFetch = fetch, bookFetch = fetch, rewardRandom, backgroundInterval = 30000, watchToken = process.env.EPISUITE_WATCH_TOKEN, backupDir = process.env.EPISUITE_BACKUP_DIR || path.join(dataDir, 'backups') } = {}) {
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const file = path.join(dataDir, 'episuite.json');
   const cosmetics = JSON.parse(await readFile(path.join(root, 'public/cosmetics.json'), 'utf8'));
@@ -41,6 +46,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   normalizeLife(state);
   normalizeProductivity(state);
   normalizeReading(state);
+  normalizeProjects(state);
   const searchBooks = createBookSearch(bookFetch);
   if (fresh) {
     Object.assign(state.settings, { quietFocus: true, showStreaks: false });
@@ -52,12 +58,40 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   state.notifications.jobs=state.notifications.jobs.filter(j=>!(j.kind==='boosts'&&j.id.startsWith('boost:')&&j.status==='pending'));
   for(const block of state.blocks)assignBlockColor(block,state.blocks.filter(b=>b!==block));
   let queue = Promise.resolve();
+  const backups = createBackups({
+    directory: backupDir, getSettings: () => state.settings,
+    getSnapshot: async () => { await queue; return portableState(state); },
+    validate: data => prepareImport(data)
+  });
   const save = () => writeWorkspace(file, state);
   if(!state.workspaceId){state.workspaceId=uid();await save();}
   const safeState = () => { const result = structuredClone(state); result.automation={configured:Boolean(state.automation.token)}; result.screentime={outstanding:Object.keys(state.screentime.keys).length}; result.notifications = publicNotifications(result.notifications); result.calendar.password = ''; result.calendar.configured = Boolean(state.calendar.password); if (result.archivedLegacy) result.archivedLegacy = '[Preserved on server; available in export]'; return result; };
+  function prepareImport(data) {
+    const imported = legacyImport(data, state);
+    imported.workspaceId = state.workspaceId;
+    imported.automation = state.automation;
+    normalizeLife(imported);
+    normalizeProductivity(imported);
+    normalizeReading(imported);
+    normalizeProjects(imported);
+    imported.life.shortcuts = imported.life.shortcuts.map(shortcut => ({ id: shortcut.id || uid(), ...shortcutInput(shortcut) }));
+    imported.notifications = state.notifications;
+    imported.rewardEvents = { config: rewardConfig(data.rewardEvents?.config || {}, state.rewardEvents.config) };
+    preserveScreenTime(imported, state);
+    for (const reward of imported.rewards) Object.assign(reward, rewardInput(reward, reward));
+    if (imported.engagement) imported.engagement = engagementInput(imported.engagement);
+    if (imported.feelings) {
+      if (!Array.isArray(imported.feelings)) throw fail('Backup feelings must be a list.');
+      imported.feelings = imported.feelings.slice(-60).map(feeling => feelingInput(feeling, imported));
+    }
+    normalizeSocial(imported);
+    for (const block of imported.blocks) assignBlockColor(block, imported.blocks.filter(other => other !== block));
+    return imported;
+  }
   const mutate = (operation, notify = true) => {
     const job = queue.then(async () => { const before = structuredClone(state); try {
       const result = await operation();
+      reconcileProjectLinks(state);
       const previousSessions = new Set(before.sessions.map(session => session.id));
       for(const session of notify?state.sessions.filter(s=>!previousSessions.has(s.id)):[]){
         enqueueNotification(state,'timer:'+session.id,'timers',session.mode==='focus'?'Focus saved':'Break finished',`${session.minutes} minutes saved${session.coins?' · '+session.coins+' coins':''}.`,Date.now());
@@ -92,6 +126,11 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
       && req.headers['sec-fetch-mode'] === 'navigate' && req.headers['sec-fetch-dest'] === 'document';
     if (req.headers['sec-fetch-site'] === 'cross-site' && !shellNavigation) throw fail('Cross-site requests are blocked.', 403);
     assertApiMethod(p, req.method);
+    if (p === '/api/backups' && req.method === 'GET') return json(res, await backups.status());
+    const backupMatch = p.match(/^\/api\/backups\/(snapshot-[a-f0-9-]+\.json)(?:\/(verify))?$/);
+    if (backupMatch && req.method === 'GET') return json(res, await backups.read(backupMatch[1]));
+    if (backupMatch && req.method === 'POST' && backupMatch[2]) return json(res, await backups.verify(backupMatch[1]));
+    if (p === '/api/backups/create' && req.method === 'POST') return json(res, await backups.create());
     if (req.method === 'GET' && p === '/api/books/search') {
       return json(res, { books: await searchBooks(url.searchParams.get('q')) });
     }
@@ -126,10 +165,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     if (req.method === 'GET' && p === '/api/cosmetics') return json(res, cosmetics);
     if (req.method === 'GET' && p === '/api/export') {
       await queue;
-      const data = structuredClone(state); delete data.screentime; delete data.automation; for(const purchase of data.purchases)if(purchase.kind==='screentime'){delete purchase.key;purchase.used=true;} data.notifications = publicNotifications(data.notifications); data.notifications.jobs = []; data.calendar.password = ''; if (data.archivedLegacy) {
-        // Legacy backups can contain credentials; never include them in a new backup.
-        data.archivedLegacy = JSON.parse(JSON.stringify(data.archivedLegacy, (k, v) => /password|token|secret/i.test(k) ? undefined : v));
-      }
+      const data = portableState(state);
       const backup = JSON.stringify(data);
       if (Buffer.byteLength(backup) > backupMaxBytes) {
         throw fail('This workspace exceeds the portable backup limit. Stop the service and back up its data directory.', 413);
@@ -165,6 +201,19 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         } catch { throw fail('Ollama is unavailable or returned an invalid response. You can add small steps yourself.', 503); }
       }
       const result = await mutate(async () => {
+        if (p === '/api/operations') {
+          const fingerprint = JSON.stringify({ kind: data.kind, entityId: data.entityId, date: data.date, data: data.data, workspace: data.workspace });
+          const prior = Object.hasOwn(state.operationReceipts, data.id || '') ? state.operationReceipts[data.id] : null;
+          if (prior) {
+            if (prior.fingerprint !== fingerprint) throw fail('This operation ID was already used for a different change.', 409);
+            return { ...prior.result, duplicate: true };
+          }
+          const applied = applyOperation(state, data, base => coinAward(state, base, Date.now(), rewardRandom));
+          state.operationReceipts[data.id] = { fingerprint, result: applied };
+          return applied;
+        }
+        const projectResult = projectMutation(state, p, req.method, data);
+        if (projectResult) return projectResult;
         if (p === '/api/books') {
           let createId;
           if (data.eventId !== undefined) {
@@ -182,6 +231,12 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           return book;
         }
         if (p === '/api/reading/task') return updateReadingTask(state, data);
+        const readingLogMatch = p.match(/^\/api\/books\/([^/]+)\/logs\/([^/]+)$/);
+        if (readingLogMatch) {
+          const book = state.reading.books.find(item => item.id === readingLogMatch[1]);
+          if (!book) throw fail('Book not found.', 404);
+          return editReadingLog(state, book, readingLogMatch[2], data, date, base => coinAward(state, base, Date.now(), rewardRandom), req.method === 'DELETE');
+        }
         const bookMatch = p.match(/^\/api\/books\/([^/]+)(?:\/(log))?$/);
         if (bookMatch) {
           const book = state.reading.books.find(item => item.id === bookMatch[1]);
@@ -240,12 +295,17 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           state.onboarding = {status:data.status,step:data.step,startedAt:state.onboarding?.startedAt||Date.now(),updatedAt:Date.now()};
           return state.onboarding;
         }
-        if (p === '/api/tasks' && req.method === 'POST') { const task = taskInput(data); validatePeople(state,task.personIds); if (task.lane === 'today' && state.tasks.filter(t => t.lane === 'today' && !t.deleted && !done(t, date)).length >= 3) throw fail('Keep today small: move a task back to your inbox first.'); task.order = Math.max(0, ...state.tasks.map(t => t.order)) + 1; state.tasks.push(task); return task; }
-        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move|undo|purge|habit))?$/);
+        if (p === '/api/tasks' && req.method === 'POST') { const task = taskInput(data, {}, state.settings.timezone); validatePeople(state,task.personIds); validateTaskProject(state,task); if (task.lane === 'today' && state.tasks.filter(t => t.lane === 'today' && !t.deleted && !done(t, date)).length >= 3) throw fail('Keep today small: move a task back to your inbox first.'); task.order = Math.max(0, ...state.tasks.map(t => t.order)) + 1; state.tasks.push(task); return task; }
+        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move|undo|purge|habit|history))?$/);
         if (taskMatch) {
           const [, id, action] = taskMatch, t = state.tasks.find(t => t.id === id);
           if (!t) throw fail('Task not found.', 404);
           if('expectedVersion' in data&&Number(data.expectedVersion)!==(t.editVersion||0))throw fail('This task changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409);
+          if (action === 'history') {
+            if (t.deleted) throw fail('Restore the task before correcting its history.');
+            if (!('expectedVersion' in data)) throw fail('Reopen task history before correcting it.', 409);
+            return correctTaskHistory(state, t, data, base => coinAward(state, base, Date.now(), rewardRandom));
+          }
           if(action==='purge'){if(req.method!=='DELETE')throw fail('Use DELETE for permanent deletion.',405);return purgeTask(state,id,data.confirmation);}
           if (action === 'habit') {
             if (req.method !== 'POST') throw fail('Use POST to record a habit action.', 405);
@@ -272,7 +332,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           if (req.method === 'DELETE') { t.deleted = true; return t; }
           if (action === 'move' && data.direction) { const sorted = state.tasks.filter(x => !x.deleted && x.lane === t.lane).sort((a, b) => a.order - b.order); const i = sorted.indexOf(t); const other = sorted[i + (data.direction === 'up' ? -1 : 1)]; if (other) [t.order, other.order] = [other.order, t.order]; return t; }
           if (data.lane === 'today' && t.lane !== 'today' && state.tasks.filter(x => x.lane === 'today' && !x.deleted && !done(x, date)).length >= 3) throw fail('Your shortlist is full. Move one task to your inbox first.');
-          const updated = taskInput(data,t);validatePeople(state,updated.personIds);Object.assign(t, updated); return t;
+          const updated = taskInput(data,t,state.settings.timezone);validatePeople(state,updated.personIds);validateTaskProject(state,updated);Object.assign(t, updated); return t;
         }
         if (p === '/api/blocks' && req.method === 'POST') { const b = blockInput(data);validatePeople(state,b.personIds);if(data.socialPlan&&!b.personIds.length)throw fail('Choose at least one person for this plan.');assignBlockColor(b,state.blocks); state.blocks.push(b); return b; }
         if (p === '/api/blocks/skip') { const b = state.blocks.find(b => b.id === data.id); if (!b) throw fail('Block not found.', 404); if(b.caldav)throw fail('Skip server events in your calendar client, then sync again.'); if (!schedule(state,date).some(x=>x.id===b.id)) throw fail('This occurrence was not found.'); b.excludedDates = [...new Set([...(b.excludedDates || []), date])]; return {ok:true}; }
@@ -323,7 +383,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           if (!state.notes.some(note => note.id === id)) state.notes.unshift({ id, text, created: finite(data.created, 0, Date.now(), Date.now()) });
           return { ok: true };
         }
-        if (p === '/api/notes/convert') { const note = state.notes.find(n => n.id === data.id); if (!note) throw fail('Capture not found.', 404); state.tasks.push(taskInput({ title: note.text, lane: 'inbox' })); state.notes = state.notes.filter(n => n.id !== note.id); return { ok: true }; }
+        if (p === '/api/notes/convert') { const note = state.notes.find(n => n.id === data.id); if (!note) throw fail('Capture not found.', 404); state.tasks.push(taskInput({ title: note.text.split('\n')[0].slice(0, 120), description: note.text, lane: 'inbox' })); state.notes = state.notes.filter(n => n.id !== note.id); return { ok: true }; }
         if (p === '/api/notes/delete') { state.notes = state.notes.filter(n => n.id !== data.id); return { ok: true }; }
         if (p === '/api/categories') { const name = String(data.name || '').trim().slice(0, 50); if (!name) throw fail('Name the category.'); if (data.remove) { state.categories = state.categories.filter(c => c !== name); state.tasks.filter(t => t.category === name).forEach(t => t.category = 'Personal'); } else if (!state.categories.includes(name)) state.categories.push(name); return { ok: true }; }
         if (p === '/api/rewards') { const reward={id:uid(),...rewardInput(data)}; state.rewards.push(reward); return reward; }
@@ -343,7 +403,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         if (p === '/api/settings') {
           const s = state.settings;
           if('calendarPastStyle' in data){if(!['gray','cross'].includes(data.calendarPastStyle))throw fail('Choose gray or X for past calendar days.');s.calendarPastStyle=data.calendarPastStyle;}
-          if('mobilePages' in data){const allowed=['life','now','tasks','plan','social','focus','capture','progress','rewards'];if(!Array.isArray(data.mobilePages)||data.mobilePages.length!==4||new Set(data.mobilePages).size!==4||data.mobilePages.some(id=>!allowed.includes(id)))throw fail('Choose four different mobile pages.');s.mobilePages=data.mobilePages;}
+          if('mobilePages' in data){const allowed=['life','now','tasks','projects','plan','social','focus','capture','progress','rewards'];if(!Array.isArray(data.mobilePages)||data.mobilePages.length!==4||new Set(data.mobilePages).size!==4||data.mobilePages.some(id=>!allowed.includes(id)))throw fail('Choose four different mobile pages.');s.mobilePages=data.mobilePages;}
           for (const key of ['sound', 'gamification', 'reducedMotion', 'lowStim', 'autoBreak', 'quietFocus', 'showStreaks', 'disableLetterShortcuts']) if (key in data) s[key] = Boolean(data[key]);
           for (const key of ['focusMinutes', 'shortBreak', 'longBreak']) if (key in data) s[key] = finite(data[key], 1, 120, s[key]);
           if ('volume' in data) s.volume = finite(data.volume, 0, 1, s.volume);
@@ -357,27 +417,16 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           if ('timerFont' in data && ['sans', 'mono', 'serif'].includes(data.timerFont)) s.timerFont = data.timerFont;
           if ('background' in data) { const value = String(data.background); if (value && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value)) throw fail('Choose a PNG, JPG or WebP background.'); s.background = value.slice(0, 2000000); }
           if ('ollamaModel' in data) s.ollamaModel = String(data.ollamaModel).slice(0, 100);
+          if ('backupEnabled' in data) s.backupEnabled = data.backupEnabled === true;
+          for (const [key, maximum] of [['backupIntervalHours', 168], ['backupKeep', 90]]) if (key in data) {
+            const value = Number(data[key]);
+            if (!Number.isInteger(value) || value < 1 || value > maximum) throw fail('Choose valid backup frequency and retention.');
+            s[key] = value;
+          }
           return { ok: true };
         }
         if (p === '/api/import') {
-          const imported = legacyImport(data, state);
-          imported.workspaceId = state.workspaceId;
-          imported.automation = state.automation;
-          normalizeLife(imported);
-          normalizeProductivity(imported);
-          normalizeReading(imported);
-          imported.life.shortcuts = imported.life.shortcuts.map(shortcut => ({ id: shortcut.id || uid(), ...shortcutInput(shortcut) }));
-          imported.notifications = state.notifications;
-          imported.rewardEvents = { config: rewardConfig(data.rewardEvents?.config || {}, state.rewardEvents.config) };
-          preserveScreenTime(imported, state);
-          for (const reward of imported.rewards) Object.assign(reward, rewardInput(reward, reward));
-          if (imported.engagement) imported.engagement = engagementInput(imported.engagement);
-          if (imported.feelings) {
-            if (!Array.isArray(imported.feelings)) throw fail('Backup feelings must be a list.');
-            imported.feelings = imported.feelings.slice(-60).map(feeling => feelingInput(feeling, imported));
-          }
-          normalizeSocial(imported);
-          for (const block of imported.blocks) assignBlockColor(block, imported.blocks.filter(other => other !== block));
+          const imported = prepareImport(data);
           await save();
           const recovery = path.join(dataDir, `before-import-${Date.now()}-${uid()}.json`);
           await copyFile(file, recovery);
@@ -419,7 +468,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     assets['/life.js'] = ['life.js', 'text/javascript'];
     assets['/social.js'] = ['social.js', 'text/javascript'];
     assets['/social-domain.js'] = ['social-domain.js', 'text/javascript'];
-    for (const file of ['productivity.js', 'device-storage.js', 'productivity-ui.js', 'books-domain.js', 'books.js']) assets['/' + file] = [file, 'text/javascript'];
+    for (const file of ['productivity.js', 'device-storage.js', 'productivity-ui.js', 'books-domain.js', 'books.js', 'projects.js', 'habit-schedule.js', 'operations.js', 'drafts.js', 'backup-ui.js', 'task-history.js']) assets['/' + file] = [file, 'text/javascript'];
     for(const file of ['icon-192.png','icon-512.png','apple-touch-icon.png'])assets['/'+file]=[file,'image/png'];
     if (!assets[p]) throw fail('Page not found.', 404);
     const [asset, type] = assets[p]; const content = await readFile(path.join(root, 'public', asset));
@@ -461,6 +510,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     if(runningTick)return runningTick;
     runningTick=(async()=>{
       await queue;
+      await backups.runDue(now);
       const reminders=state.notifications.config.enabled&&state.notifications.config.reminders?dueReminders(state,now):[];
       if(state.timer?.status==='running'&&remaining(state.timer,now)===0||reminders.some(r=>!state.notifications.jobs.some(j=>j.id==='reminder:'+r.id)))await mutate(()=>{
         for(const r of reminders)enqueueNotification(state,'reminder:'+r.id,'reminders','Upcoming: '+r.name,`${r.name} starts at ${new Intl.DateTimeFormat('en',{timeZone:state.settings.timezone,hour:'numeric',minute:'2-digit'}).format(new Date(r.startsAt))}${r.location?' · '+r.location:''}.`,now,r.startsAt+60000);
@@ -485,7 +535,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   }
   const worker=backgroundInterval>0?setInterval(()=>backgroundTick().catch(()=>{}),backgroundInterval):null;
   worker?.unref();
-  return { server, backgroundTick, getState: () => structuredClone(state), close: async () => {closing=true;clearInterval(worker);await runningTick;const stopped=new Promise(resolve=>server.close(resolve));server.closeAllConnections();await queue;await stopped;} };
+  return { server, backgroundTick, getState: () => structuredClone(state), close: async () => {closing=true;clearInterval(worker);await runningTick;await backups.close();const stopped=new Promise(resolve=>server.close(resolve));server.closeAllConnections();await queue;await stopped;} };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 3210), host = process.env.HOST || '127.0.0.1';

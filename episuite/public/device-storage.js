@@ -4,10 +4,11 @@ let database;
 
 function openDatabase() {
   database ||= new Promise((resolve, reject) => {
-    const request = indexedDB.open('episuite-device', 1);
+    const request = indexedDB.open('episuite-device', 3);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore('captures', { keyPath: ['workspace', 'id'] });
-      request.result.createObjectStore('experiments', { keyPath: ['workspace', 'id'] });
+      for (const name of ['captures', 'experiments', 'operations', 'snapshots']) {
+        if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name, { keyPath: ['workspace', 'id'] });
+      }
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -87,4 +88,24 @@ export function saveExperiment(workspace, id, { kind, condition, outcome, fricti
 
 export function clearExperiments(workspace) {
   return useStore('experiments', 'readwrite', store => store.delete(workspaceRange(workspace)));
+}
+
+export function enqueueOperation(operation) {
+  return useStore('operations', 'readwrite', store => store.put(operation));
+}
+export async function pendingOperations(workspace) {
+  const operations = await useStore('operations', 'readonly', store => store.getAll(workspaceRange(workspace)));
+  return operations.sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence);
+}
+export function acknowledgeOperation(workspace, id) {
+  return useStore('operations', 'readwrite', store => store.delete([workspace, id]));
+}
+export function saveConfirmedSnapshot(state) {
+  const snapshot = structuredClone(state);
+  delete snapshot.pendingOperationIds;
+  return useStore('snapshots', 'readwrite', store => store.put({ workspace: state.workspaceId, id: 'confirmed', state: snapshot }));
+}
+export async function confirmedSnapshot(workspace) {
+  const record = await useStore('snapshots', 'readonly', store => store.get([workspace, 'confirmed']));
+  return record?.state;
 }

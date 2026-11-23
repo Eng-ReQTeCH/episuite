@@ -16,6 +16,14 @@ import {habitRestCount} from './domain.js';
 import {loadSnapshot,saveSnapshot,pendingCaptures,enqueueCapture,acknowledgeCapture,experimentRecords,saveExperiment,clearExperiments} from './device-storage.js';
 import {priorityPanel,habitSummary,experimentSummary,focusTools} from './productivity-ui.js';
 import {bookTools} from './books.js';
+import {projectsPanel,projectTools} from './projects.js';
+import {draftRecovery} from './drafts.js';
+import {backupControls,backupTools} from './backup-ui.js';
+import {applyOperation,operationForRequest} from './operations.js';
+import {startTimer as startLocalTimer,pauseTimer as pauseLocalTimer,resumeTimer as resumeLocalTimer,finishTimer as finishLocalTimer} from './domain.js';
+import {enqueueOperation,pendingOperations,acknowledgeOperation,saveConfirmedSnapshot,confirmedSnapshot} from './device-storage.js';
+import {taskProgress} from './habit-schedule.js';
+import {taskHistoryTools} from './task-history.js';
 let socialCircle = '', socialQuery = '', eligibilityKey = '';
 
 let calendarView = matchMedia('(max-width:700px)').matches?'agenda':'month', checkingReminders = false;
@@ -25,7 +33,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;
 const btn = (label, action, id = '', style = 'secondary', extra = '') => `<button class="btn ${style}" data-action="${action}" ${id ? `data-id="${esc(id)}"` : ''} ${extra}>${label}</button>`;
 const field = (label, name, value = '', type = 'text', attrs = '') => `<div class="field"><label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" ${attrs}></div>`;
 const select = (label, name, options, value) => `<div class="field"><label for="f-${name}">${label}</label><select id="f-${name}" name="${name}">${options.map(([v, text]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(text)}</option>`).join('')}</select></div>`;
-let state, page = location.hash.slice(1) || 'now', online = true, busy = false, energy = 'medium', timerMode = 'focus', duration = 25, selectedTask = undefined, planDate, taskTab = 'all', search = '', category = '', zen = false, toastTimeout, lastFocus;
+let state, page = location.hash.slice(1) || 'now', online = true, busy = false, energy = 'medium', timerMode = 'focus', duration = 25, selectedTask = undefined, planDate, taskTab = 'all', search = '', category = '', taskProject = '', taskStatus = '', zen = false, toastTimeout, lastFocus;
 let audio, soundNode, soundGain, soundKind = 'off', videoUrl = null;
 let winTimeout, actionChoices=[], installPrompt=null;
 window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();installPrompt=event;});
@@ -65,7 +73,7 @@ function focusExperimentDialog(kind = 'audio') {
 function weeklyReviewDialog() {
   const review = state.weeklyReviews?.[weekStart(today())] || {};
   showDialog('Weekly review',
-    `<input type="hidden" name="expectedVersion" value="${review.editVersion || 0}">` +
+    `<input type="hidden" name="draftKey" value="${weekStart(today())}"><input type="hidden" name="expectedVersion" value="${review.editVersion || 0}">` +
     field('One outcome I moved forward', 'outcome', review.outcome, 'text', 'maxlength="240"') +
     field('One thing that got in my way', 'friction', review.friction, 'text', 'maxlength="240"') +
     field('One adjustment for next week', 'adjustment', review.adjustment, 'text', 'maxlength="240"'),
@@ -73,7 +81,7 @@ function weeklyReviewDialog() {
 }
 
 let audioCondition = 'usual';
-const navItems = [['life', '▧', 'LIFE OS'], ['now', '◉', 'Today'], ['tasks', '☷', 'Tasks'], ['plan', '▦', 'Calendar'], ['social', '♧', 'Social'], ['focus', '◷', 'Focus'], ['capture', '⌑', 'Capture'], ['progress', '↗', 'Progress'], ['rewards', '◇', 'Rewards']];
+const navItems = [['life', '▧', 'LIFE OS'], ['now', '◉', 'Today'], ['tasks', '☷', 'Tasks'], ['projects', '▤', 'Projects'], ['plan', '▦', 'Calendar'], ['social', '♧', 'Social'], ['focus', '◷', 'Focus'], ['capture', '⌑', 'Capture'], ['progress', '↗', 'Progress'], ['rewards', '◇', 'Rewards']];
 const guideSteps = [
   {page:'now',name:'Today',title:'Your daily starting point',text:'Today keeps one next action, your timer, and up to three open tasks in view. You do not need to fill all three spaces.',tip:'The daily loop: choose one task → focus briefly → take a break. Close the day when you are done.'},
   {page:'tasks',name:'Tasks',title:'Get one thing out of your head',text:'All open shows every unfinished task. Today is a selection of up to three from that same list. Habits repeat and keep their history.',tip:'Name an action you can begin: “Open the assignment” is easier to start than “Sort my life out”. Add just one task; leave it in All tasks if it can wait.',action:'guide-new-task',label:'+ Add one task'},
@@ -111,7 +119,15 @@ const clock = minute => minute === null ? 'After wake' : `${String(Math.floor((m
 const timeText = seconds => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 function toast(message, undo) { clearTimeout(toastTimeout); $('#toast').innerHTML = esc(message) + (undo ? btn('Undo', 'undo', undo, 'text compact') : ''); $('#toast').classList.add('show'); toastTimeout = setTimeout(() => $('#toast').classList.remove('show'), undo ? 9000 : 4500); }
 async function request(endpoint, data, method = 'POST') {
-  if (!online) throw new Error('The server is offline. Your saved workspace is still here; reconnect to make changes.');
+  if (/^\/api\/timer\/(pause|resume|finish|reset)$/.test(endpoint) && state?.timer && (!state.timer.local || state.timer.serverLinked)) {
+    const at = Date.now();
+    return requestOperation({ kind: 'timer-control', entityId: state.timer.id, data: { ...data, action: endpoint.split('/').at(-1), timerId: state.timer.id, expectedTimer: structuredClone(state.timer), at } }, dateKey(at, state.settings.timezone));
+  }
+  if (endpoint.startsWith('/api/timer/') && (state?.timer?.local || !online)) return localTimerRequest(endpoint, data || {});
+  const date = data?.date || new URL(endpoint, location.origin).searchParams.get('date') || today();
+  const operation = state?.workspaceId && operationForRequest(state, endpoint, data || {}, method, date);
+  if (operation) return requestOperation(operation, date);
+  if (!online) throw new Error('The server is offline. Reading logs, task check-offs and capture can be saved here. Reconnect for other changes.');
   const backupFile = endpoint === '/api/import' && data instanceof Blob ? data : null;
   data={...data};
   const match=endpoint.split('?')[0].match(/^\/api\/(tasks|blocks)\/([^/]+)/);
@@ -119,9 +135,102 @@ async function request(endpoint, data, method = 'POST') {
   if(/^\/api\/timer\/(pause|resume|finish|reset)$/.test(endpoint)&&!('timerId' in data))data.timerId=state.timer?.id||null;
   const response = await fetch(endpoint, { method, headers: { 'Content-Type': 'application/json' }, body: backupFile || JSON.stringify(data || {}) });
   const result = await response.json();
-  if(result.state&&(!state||result.state.workspaceId!==state.workspaceId||result.state.revision>=state.revision)){state=result.state;cache();}
+  if(result.state&&(!state||result.state.workspaceId!==state.workspaceId||result.state.revision>=state.revision)){const deviceTimer=state?.timer?.local&&state.workspaceId===result.state.workspaceId?state.timer:null;state=result.state;saveConfirmedSnapshot(state).catch(()=>{});if(deviceTimer)state.timer=deviceTimer;cache();}
   if(!response.ok){if(response.status===409&&!$('#dialog').open)render();throw new Error(result.error||'Could not save. Try again.');}
   return result;
+}
+async function localTimerRequest(endpoint, data) {
+  if (endpoint === '/api/timer/start') {
+    const timer = startLocalTimer(state, data);
+    timer.local = true; cache(); return { result: timer, local: true };
+  }
+  if (!state.timer?.local) throw Error('Reconnect to control the session saved on your server.');
+  if (data.timerId && data.timerId !== state.timer.id) throw Error('This local session changed. Reopen its controls.');
+  if (endpoint === '/api/timer/pause') { const result = pauseLocalTimer(state); cache(); return { result }; }
+  if (endpoint === '/api/timer/resume') { const result = resumeLocalTimer(state); cache(); return { result }; }
+  if (endpoint === '/api/timer/reset') { state.timer = null; cache(); return { result: { ok: true } }; }
+  if (endpoint === '/api/timer/finish') {
+    const preview = structuredClone(state);
+    const session = finishLocalTimer(preview, Date.now(), Boolean(data.early));
+    if (!session) { state.timer = null; cache(); return { result: null }; }
+    state.timer = null;
+    return requestOperation({ kind: 'focus-session', entityId: session.id, data: { ...session, eventId: session.id } }, session.date);
+  }
+  throw Error('This timer control requires the server.');
+}
+let pendingOperationCount = 0, operationSignature = '';
+let localTimerFinishing = false;
+
+async function requestOperation(specification, date) {
+  const operation = {
+    ...specification, id: specification.data.operationId || specification.data.eventId || uid(),
+    workspace: state.workspaceId, date, createdAt: Date.now(), sequence: performance.now(), status: 'pending'
+  };
+  const preview = structuredClone(state);
+  const result = applyOperation(preview, operation, () => ({ coins: 0, baseCoins: 0, rewardTier: 'fixed' }));
+  if (operation.kind === 'timer-control' && preview.timer) Object.assign(preview.timer, { local: true, serverLinked: true });
+  preview.pendingOperationIds = [...(state.pendingOperationIds || []), operation.id];
+  await enqueueOperation(operation);
+  pendingOperationCount = (await pendingOperations(state.workspaceId)).length;
+  if (online) {
+    try {
+      const response = await fetch('/api/operations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(operation), signal: AbortSignal.timeout(10000)
+      });
+      const saved = await response.json();
+      if (saved.state) { const deviceTimer = state.timer?.local && operation.kind !== 'timer-control' ? state.timer : null; state = saved.state; await saveConfirmedSnapshot(state).catch(() => {}); if (deviceTimer) state.timer = deviceTimer; }
+      if (response.status >= 500 || response.status === 429) {
+        online = false; state = preview; cache(); return { result, queued: true };
+      }
+      if (!response.ok) {
+        await enqueueOperation({ ...operation, status: 'conflict', error: saved.error });
+        cache();
+        throw new Error(saved.error || 'Review this pending change.');
+      }
+      await acknowledgeOperation(operation.workspace, operation.id);
+      pendingOperationCount = (await pendingOperations(operation.workspace)).length;
+      cache();
+      return saved;
+    } catch (error) {
+      if (!(error instanceof TypeError) && error.name !== 'TimeoutError') throw error;
+      online = false;
+    }
+  }
+  state = preview;
+  cache();
+  return { result, queued: true };
+}
+
+async function syncOperations(incoming) {
+  const workspace = incoming.workspaceId;
+  for (const operation of await pendingOperations(workspace)) {
+    if (operation.status === 'conflict') continue;
+    try {
+      const response = await fetch('/api/operations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(operation), signal: AbortSignal.timeout(10000)
+      });
+      const saved = await response.json();
+      if (saved.state) { incoming = saved.state; await saveConfirmedSnapshot(incoming).catch(() => {}); }
+      if (response.status >= 500 || response.status === 429) break;
+      if (response.ok) await acknowledgeOperation(workspace, operation.id);
+      else await enqueueOperation({ ...operation, status: 'conflict', error: saved.error || 'This change needs review.' });
+    } catch { break; }
+  }
+  const pending = await pendingOperations(workspace);
+  pendingOperationCount = pending.length;
+  operationSignature = pending.map(operation => operation.id + operation.status).join(',');
+  for (const operation of pending.filter(item => item.status !== 'conflict')) {
+    if (incoming.pendingOperationIds?.includes(operation.id)) continue;
+    try {
+      const preview = structuredClone(incoming);
+      applyOperation(preview, operation, () => ({ coins: 0, baseCoins: 0, rewardTier: 'fixed' }));
+      preview.pendingOperationIds = [...(incoming.pendingOperationIds || []), operation.id];
+      incoming = preview;
+    } catch {}
+  }
+  return incoming;
 }
 let pendingCount = 0, captureError = '', snapshotFailed = false, loading;
 function cache() { snapshotFailed = !saveSnapshot(state); }
@@ -148,15 +257,21 @@ function load(initial = false) {
   return loading;
 }
 async function refreshWorkspace(initial) {
+  const wasOnline = online, priorPending = pendingCount, priorOperations = pendingOperationCount, priorError = captureError;
   try {
-    const headers=state?.workspaceId?{'If-None-Match':`"${state.workspaceId}:${state.revision}"`}:{};
+    const savedWorkspace = state || loadSnapshot();
+    const localTimer = savedWorkspace?.timer?.local ? structuredClone(savedWorkspace.timer) : null;
+    const headers=state?.workspaceId&&!pendingOperationCount?{'If-None-Match':`"${state.workspaceId}:${state.revision}"`}:{};
     const response = await fetch('/api/state',{headers});
     if (!response.ok && response.status !== 304) throw Error();
     let incoming = response.status === 304 ? state : await response.json();
+    if (response.status !== 304) await saveConfirmedSnapshot(incoming).catch(() => {});
     const previousPending = pendingCount, previousError = captureError;
+    const previousOperations = operationSignature;
     let localCaptures = [];
     try {
       const workspace = incoming.workspaceId;
+      incoming = await syncOperations(incoming);
       const pending = await pendingCaptures(workspace);
       localCaptures = pending;
       pendingCount = pending.length;
@@ -178,9 +293,11 @@ async function refreshWorkspace(initial) {
       incoming.notes.unshift(...localCaptures.filter(note => !known.has(note.id)));
     }
     if (state && incoming.workspaceId===state.workspaceId && incoming.revision < state.revision) return;
-    const changed = !state || incoming.workspaceId !== state.workspaceId || incoming.revision !== state.revision || !online || previousPending !== pendingCount || previousError !== captureError;
+    const changed = !state || incoming.workspaceId !== state.workspaceId || incoming.revision !== state.revision || !online || previousPending !== pendingCount || previousError !== captureError || previousOperations !== operationSignature;
     const oldTimer = state?.timer, priorKeepsakes=state?keepsakes(state,today()):null;
-    state = incoming; if(state.timer){timerMode=state.timer.mode;duration=state.timer.duration/60;} online = true; if (changed) cache();
+    const timerCommands = (await pendingOperations(incoming.workspaceId)).filter(operation => operation.kind === 'timer-control' && operation.data.timerId === localTimer?.id);
+    if (localTimer && incoming.workspaceId === savedWorkspace.workspaceId && (!localTimer.serverLinked || timerCommands.length)) incoming.timer = localTimer;
+    state = incoming; if(state.timer){timerMode=state.timer.mode;duration=state.timer.duration/60;} online = true; if (changed || localTimer) cache();
     if (initial) experimentRecords(state.workspaceId).catch(() => {});
     if (oldTimer && oldTimer.id!==state.timer?.id && incoming.sessions.some(s => s.id === oldTimer.id)) onTimerComplete(oldTimer,priorKeepsakes);
     if (initial && state.onboarding?.status==='active' && !location.hash) page=guideSteps[state.onboarding.step]?.page||'now';
@@ -193,14 +310,16 @@ async function refreshWorkspace(initial) {
     if (state) {
       state.social ||= initialState().social;
       state.reading ||= initialState().reading;
+      state.projects ||= [];
       planDate ||= today();
       try {
         const pending = await pendingCaptures(state.workspaceId);
         pendingCount = pending.length;
+        pendingOperationCount = (await pendingOperations(state.workspaceId)).length;
         const syncedIds = new Set(state.notes.map(note => note.id));
         state.notes.unshift(...pending.filter(note => !syncedIds.has(note.id)));
       } catch { captureError = 'Offline capture storage is unavailable on this device.'; }
-      if (!$('#dialog').open && !document.activeElement?.matches('input,textarea,select')) render();
+      if ((initial || wasOnline || priorPending !== pendingCount || priorOperations !== pendingOperationCount || priorError !== captureError) && !$('#dialog').open && !document.activeElement?.matches('input,textarea,select')) render();
     }
     else $('#app').innerHTML = `<main class="loading"><h1>Let's reconnect.</h1><p>Episuite needs its local server to open your workspace.</p>${btn('Try again', 'reload', '', 'primary')}</main>`;
   }
@@ -219,16 +338,19 @@ function applyLook() {
 function mobileDockItems(){const available=navItems.filter(([id])=>id!=='rewards'||state.settings.gamification),requested=state.settings.mobilePages||['now','tasks','plan','focus'],ids=[...new Set([...requested,'now','tasks','plan','focus'])].filter(id=>available.some(n=>n[0]===id)).slice(0,4);return [...ids.map(id=>available.find(n=>n[0]===id)),['menu','⋯','More']];}
 function render() {
   if (!state) return;
+  document.querySelectorAll('main form[data-form]').forEach(form => drafts.capture(form));
   const focus = document.activeElement;
   const restoreFocus = focus?.matches('button[data-action]') && $('#app').contains(focus)
     ? { action: focus.dataset.action, id: focus.dataset.id, step: focus.dataset.step } : null;
   if(!state.settings.gamification||!momentum(state,today()).prefs.feedback)$('#momentum-win')?.remove();
-  if (!['now', 'tasks', 'plan', 'social', 'focus', 'capture', 'progress', 'rewards', 'settings', 'life', 'circles'].includes(page)) page = 'now';
+  if (!['now', 'tasks', 'plan', 'social', 'focus', 'capture', 'progress', 'rewards', 'settings', 'life', 'circles', 'projects'].includes(page)) page = 'now';
   applyLook();
   const totalInbox = state.tasks.filter(t => !t.deleted && !done(t,today()) && (t.repeat==='none'||isDue(t,today()))).length;
-  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 5h21v6H12v3h12v5H12v3h15v6H6z" fill="currentColor"/></svg></span>episuite</div><nav class="nav" aria-label="Main navigation">${navItems.filter(([id]) => id !== 'rewards' || state.settings.gamification).map(([id, symbol, title]) => `<button data-action="nav" data-id="${id}" class="${page === id ? 'active' : ''}" ${page === id ? 'aria-current="page"' : ''}><span class="nav-symbol" aria-hidden="true">${symbol}</span>${title}${id === 'tasks' && totalInbox ? `<span class="count">${totalInbox}</span>` : id === 'capture' && state.notes.length ? `<span class="count">${state.notes.length}</span>` : ''}</button>`).join('')}</nav><div class="side-bottom"><div class="side-note"><span class="eyebrow">WORKSPACE SHORTCUTS</span><p><kbd>N</kbd> New task<br><kbd>C</kbd> Capture a thought<br><kbd>F</kbd> Focus</p></div><nav class="nav" aria-label="Preferences"><button data-action="nav" data-id="settings" class="${page === 'settings' ? 'active' : ''}"><span class="nav-symbol" aria-hidden="true">⚙</span>Settings</button></nav></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">Workspace <span aria-hidden="true">/</span> ${page === 'circles'?'Manage circles':page === 'settings' ? 'Settings' : navItems.find(n => n[0] === page)?.[2]} <span class="status ${online ? '' : 'offline'}"><span class="status-dot"></span>${online ? 'Synced to your server' : 'Offline · capture available'}${pendingCount ? ` · ${pendingCount} pending` : ''}</span></div><div class="top-actions">${state.timer && page !== 'focus' ? btn(`<span data-mini-timer>${timeText(remaining(state.timer))}</span> · ${state.timer.mode === 'focus' ? 'Focus' : 'Break'}`, 'nav', 'focus', 'soft') : ''}${btn('+ Capture <span class="kbd">C</span>', 'quick-capture', '', 'secondary')}${btn('Setup guide','guide-start','','text compact guide-entry')}<button data-action="nav" data-id="settings" class="avatar" aria-label="Open settings">${esc(state.settings.gamification && state.settings.equipped?.badge?.icon || (state.settings.name || 'Y')[0].toUpperCase())}</button>${btn('Settings', 'nav', 'settings', 'text compact mobile-settings')}</div></header><main id="main" class="content" tabindex="-1">${snapshotFailed || captureError ? `<p class="notice warning" role="status">${esc(captureError || 'This browser could not refresh its offline workspace snapshot.')}</p>` : ''}${guidePanel()}${({ circles:()=>circlesPage(state), life:()=>lifePage(state,today(),{...lifeUI.view(),celebration:shouldIgnite()}), now: nowPage, tasks: tasksPage, plan: planPage, social: () => socialPage(state,today(),{circle:socialCircle,query:socialQuery}), focus: focusPage, capture: capturePage, progress: progressPage, rewards: rewardsPage, settings: settingsPage })[page]()}</main></div></div><nav class="phone-dock" aria-label="Quick phone navigation">${mobileDockItems().map(([id,symbol,label])=>`<button data-action="nav" data-id="${id}" ${page===id?'aria-current="page"':''}><span aria-hidden="true">${symbol}</span>${id==='progress'&&!state.settings.gamification?'Progress':label}</button>`).join('')}</nav>`;
+  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 5h21v6H12v3h12v5H12v3h15v6H6z" fill="currentColor"/></svg></span>episuite</div><nav class="nav" aria-label="Main navigation">${navItems.filter(([id]) => id !== 'rewards' || state.settings.gamification).map(([id, symbol, title]) => `<button data-action="nav" data-id="${id}" class="${page === id ? 'active' : ''}" ${page === id ? 'aria-current="page"' : ''}><span class="nav-symbol" aria-hidden="true">${symbol}</span>${title}${id === 'tasks' && totalInbox ? `<span class="count">${totalInbox}</span>` : id === 'capture' && state.notes.length ? `<span class="count">${state.notes.length}</span>` : ''}</button>`).join('')}</nav><div class="side-bottom"><div class="side-note"><span class="eyebrow">WORKSPACE SHORTCUTS</span><p><kbd>N</kbd> New task<br><kbd>C</kbd> Capture a thought<br><kbd>F</kbd> Focus</p></div><nav class="nav" aria-label="Preferences"><button data-action="nav" data-id="settings" class="${page === 'settings' ? 'active' : ''}"><span class="nav-symbol" aria-hidden="true">⚙</span>Settings</button></nav></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">Workspace <span aria-hidden="true">/</span> ${page === 'circles'?'Manage circles':page === 'settings' ? 'Settings' : navItems.find(n => n[0] === page)?.[2]} <span class="status ${online ? '' : 'offline'}"><span class="status-dot"></span>${online ? 'Synced to your server' : 'Offline · capture available'}${pendingCount + pendingOperationCount ? ` · ${pendingCount + pendingOperationCount} pending` : ''}</span></div><div class="top-actions">${state.timer && page !== 'focus' ? btn(`<span data-mini-timer>${timeText(remaining(state.timer))}</span> · ${state.timer.mode === 'focus' ? 'Focus' : 'Break'}`, 'nav', 'focus', 'soft') : ''}${btn('+ Capture <span class="kbd">C</span>', 'quick-capture', '', 'secondary')}${btn('Setup guide','guide-start','','text compact guide-entry')}<button data-action="nav" data-id="settings" class="avatar" aria-label="Open settings">${esc(state.settings.gamification && state.settings.equipped?.badge?.icon || (state.settings.name || 'Y')[0].toUpperCase())}</button>${btn('Settings', 'nav', 'settings', 'text compact mobile-settings')}</div></header><main id="main" class="content" tabindex="-1">${snapshotFailed || captureError ? `<p class="notice warning" role="status">${esc(captureError || 'This browser could not refresh its offline workspace snapshot.')}</p>` : ''}${guidePanel()}${({ projects:()=>projectsPanel(state,today()), circles:()=>circlesPage(state), life:()=>lifePage(state,today(),{...lifeUI.view(),celebration:shouldIgnite()}), now: nowPage, tasks: tasksPage, plan: planPage, social: () => socialPage(state,today(),{circle:socialCircle,query:socialQuery}), focus: focusPage, capture: capturePage, progress: progressPage, rewards: rewardsPage, settings: settingsPage })[page]()}</main></div></div><nav class="phone-dock" aria-label="Quick phone navigation">${mobileDockItems().map(([id,symbol,label])=>`<button data-action="nav" data-id="${id}" ${page===id?'aria-current="page"':''}><span aria-hidden="true">${symbol}</span>${id==='progress'&&!state.settings.gamification?'Progress':label}</button>`).join('')}</nav>`;
   applyCalmLayout(page,$('#main'),state);
+  if (pendingOperationCount) $('#main').insertAdjacentHTML('afterbegin', `<div class="notice warning row spread wrap" role="status"><span>${pendingOperationCount} saved change${pendingOperationCount === 1 ? '' : 's'} waiting to sync</span>${btn('Review saved changes','pending-changes','','secondary compact')}</div>`);
   if ($('#sound-select')) $('#sound-select').value = soundKind;
+  document.querySelectorAll('main form[data-form]').forEach(form => drafts.restore(form));
   mountVideo();
   prepareLifeGraphs();
   updateTimer();
@@ -278,8 +400,8 @@ function growthPanel(){
 function taskFlame(t){
  if (state.settings.showStreaks === false) return '';
  const {current,active}=taskStreak(t,today());
- const scheduled=t.repeat==='weekly'||(t.repeat?.startsWith('interval_')&&Number(t.repeat.slice(9))>1);
- const label=`${current} ${scheduled?'scheduled check-offs':`day${current===1?'':'s'}`} in a row with a check-off${active?' · recorded today':' · not yet today'}`;
+ const scheduled=t.repeat==='weekdays'||t.repeat==='weekly'||(t.repeat?.startsWith('interval_')&&Number(t.repeat.slice(9))>1);
+ const label=t.repeat==='quota' ? `${current} week${current===1?'':'s'} meeting your quota${active?' · this week complete':' · this week in progress'}` : `${current} ${scheduled?'scheduled check-offs':`day${current===1?'':'s'}`} in a row with a check-off${active?' · recorded today':' · not yet today'}`;
  return `<span class="task-streak ${active?'is-lit':'is-dormant'}" data-streak="${current}" data-active="${active}" role="img" aria-label="${esc(label)}" title="${esc(label)}"><svg viewBox="0 0 24 30" aria-hidden="true"><path d="M13 1c1 6-3 8-5 12-1 2-1 3-1 4-2-1-3-3-3-5-5 6-4 12 1 15 4 3 11 3 15-1 5-5 3-12-2-17 0 4-1 5-3 6 1-5 0-10-2-14Z" fill="currentColor"/><path d="M12 16c0 3-3 5-3 8 0 4 6 5 7 1 1-3-2-6-2-7 0 2-1 3-2 3 1-2 0-4 0-5Z" fill="#ffe1a0"/></svg><span>${current}</span></span>`;
 }
 function habitTools(task) {
@@ -296,7 +418,7 @@ function habitTools(task) {
 }
 function taskRow(t, number = false) {
   const completed = done(t, today()), eligibleAt=nextEligibleAt(t,today()), waiting=eligibleAt&&eligibleAt>Date.now();
-  return `<div class="task-row ${completed ? 'completed' : ''}">${number ? `<span class="task-number">${String(number).padStart(2, '0')}</span>` : ''}<button class="checkbox ${completed ? 'checked' : ''}" data-action="complete" data-id="${esc(t.id)}" aria-label="${completed ? 'Undo completion of' : 'Complete'} ${esc(t.title)}" aria-pressed="${completed}">${completed ? '✓' : ''}</button><div class="task-content"><div class="task-title-line"><button class="task-title" data-action="edit-task" data-id="${esc(t.id)}">${esc(t.title)}</button>${taskFlame(t)}</div><div class="task-meta"><span>${esc(t.category)}</span><span>·</span><span>${t.minutes} min</span>${t.repeat !== 'none' ? `<span>· ${t.repeat==='interval_0.5'?'Twice a day':esc(t.repeat.replace('interval_', 'Every '))}${t.repeat.startsWith('interval_')&&t.repeat!=='interval_0.5'?' days':''}${t.target > 1 ? ` · ${countToday(t, today())}/${t.target}` : ''}</span>` : ''}${waiting?`<span class="habit-waiting">Later today · available after ${new Intl.DateTimeFormat('en',{timeZone:state.settings.timezone,hour:'numeric',minute:'2-digit'}).format(new Date(eligibleAt))}</span>`:''}${t.personIds?.length?peopleChips(state,t.personIds):''}${t.due ? `<span>· ${t.due < today() ? 'Was due ' : 'Due '}${esc(t.due)}</span>` : ''}${t.steps.length ? `<span>· ${t.steps.filter(s => s.done).length}/${t.steps.length} steps</span>` : ''}</div>${habitTools(t)}</div><div class="task-tools">${!completed ? btn(t.lane === 'today' ? 'Focus' : 'Today +', t.lane === 'today' ? 'focus-task' : 'today-task', t.id, 'text compact') : ''}${!completed&&countToday(t,today())>0?btn('Undo last','undo-habit',t.id,'text compact'):''}${t.lane==='today'&&!completed?btn('Remove from today','unselect-task',t.id,'text compact'):''}${btn('History','task-history',t.id,'text compact')}${btn('↕', 'reorder', t.id, 'text compact reorder', 'aria-label="Reorder task"')}${btn('⋯', 'edit-task', t.id, 'text compact', `aria-label="Edit ${esc(t.title)}"`)}</div></div>`;
+  return `<div class="task-row ${completed ? 'completed' : ''}">${number ? `<span class="task-number">${String(number).padStart(2, '0')}</span>` : ''}<button class="checkbox ${completed ? 'checked' : ''}" data-action="complete" data-id="${esc(t.id)}" aria-label="${completed ? 'Undo completion of' : 'Complete'} ${esc(t.title)}" aria-pressed="${completed}">${completed ? '✓' : ''}</button><div class="task-content"><div class="task-title-line"><button class="task-title" data-action="edit-task" data-id="${esc(t.id)}">${esc(t.title)}</button>${taskFlame(t)}</div><div class="task-meta"><span>${esc(t.category)}</span><span>·</span><span>${t.minutes} min</span>${t.repeat !== 'none' ? `<span>· ${t.repeat==='quota'?`${taskProgress(t,today()).count}/${t.weeklyTarget} this week`:t.repeat==='weekdays'?'Chosen weekdays':t.repeat==='interval_0.5'?'Twice a day':esc(t.repeat.replace('interval_', 'Every '))}${t.repeat.startsWith('interval_')&&t.repeat!=='interval_0.5'?' days':''}${t.target > 1 ? ` · ${countToday(t, today())}/${t.target}` : ''}</span>` : ''}${waiting?`<span class="habit-waiting">Later today · available after ${new Intl.DateTimeFormat('en',{timeZone:state.settings.timezone,hour:'numeric',minute:'2-digit'}).format(new Date(eligibleAt))}</span>`:''}${t.workStatus==='waiting'?`<span class="pill">Waiting · ${esc(t.waitingFor || 'No reason recorded')}</span>`:''}${t.projectId?`<span>Project · ${esc(state.projects.find(project=>project.id===t.projectId)?.title || '')}</span>`:''}${t.personIds?.length?peopleChips(state,t.personIds):''}${t.due ? `<span>· ${t.due < today() ? 'Was due ' : 'Due '}${esc(t.due)}</span>` : ''}${t.steps.length ? `<span>· ${t.steps.filter(s => s.done).length}/${t.steps.length} steps</span>` : ''}</div>${habitTools(t)}</div><div class="task-tools">${!completed ? btn(t.lane === 'today' ? 'Focus' : 'Today +', t.lane === 'today' ? 'focus-task' : 'today-task', t.id, 'text compact') : ''}${!completed&&countToday(t,today())>0?btn('Undo last','undo-habit',t.id,'text compact'):''}${t.lane==='today'&&!completed?btn('Remove from today','unselect-task',t.id,'text compact'):''}${btn('History','task-history',t.id,'text compact')}${btn('↕', 'reorder', t.id, 'text compact reorder', 'aria-label="Reorder task"')}${btn('⋯', 'edit-task', t.id, 'text compact', `aria-label="Edit ${esc(t.title)}"`)}</div></div>`;
 }
 function timerModes() { return `<div class="timer-modes" aria-label="Timer mode">${[['focus', 'Focus'], ['short', 'Short break'], ['long', 'Long break']].map(([id, name]) => `<button data-action="timer-mode" data-id="${id}" class="${timerMode === id ? 'active' : ''}" aria-pressed="${timerMode === id}" ${state.timer ? 'disabled' : ''}>${name}</button>`).join('')}</div>`; }
 function durations() { return `<div class="duration" aria-label="Session length">${(timerMode === 'focus' ? [2, 10, 25, 45] : [2, 5, 10, 15]).map(n => `<button data-action="duration" data-id="${n}" class="${duration === n ? 'active' : ''}" aria-pressed="${duration === n}" ${state.timer ? 'disabled' : ''}>${n} min</button>`).join('')}</div>`; }
@@ -330,7 +452,7 @@ function baseNowPage() {
     <section class="focus-card" aria-label="Next action">
       <div class="focus-label"><span class="action-index">${cleared ? '✓' : '01'}</span><span>${active ? 'YOUR SAVED SESSION' : t ? 'NEXT ACTION' : cleared ? 'YOU FOLLOWED THROUGH' : 'MAKE A START'}</span><span class="focus-signal">ONE THING AT A TIME</span></div>
       <h2>${active && active.mode!=='focus' ? 'Space to<br>recharge.' : t ? esc(t.title) : active ? 'Your focus<br>is saved.' : cleared ? 'Shortlist<br>complete.' : waitingTask ? 'A little<br>space.' : 'Start with<br>one thing.'}</h2>
-      ${active ? `<p class="hero-description">${active.mode==='focus'?'Your session follows you between devices. Your place is kept.':'A break is underway. Look away, stretch, or get water.'}</p><div class="actions row wrap">${btn(active.mode==='focus'?'Return to my session →':'Return to my break →','nav','focus','primary')}</div>` : t ? `<div class="task-meta"><span>${esc(t.category)}</span><span>${t.minutes} MIN ESTIMATE</span><span>${esc(t.energy)} energy</span></div><div class="first-step"><span>YOUR FIRST MOVE</span>${nextAction ? esc(nextAction) : first ? `<button class="step-start" data-action="step" data-id="${esc(t.id)}" data-step="${esc(first.id)}" aria-label="Complete step ${esc(first.title)}"><span aria-hidden="true">○</span>${esc(first.title)}</button>` : 'Choose one action you can do in the next two minutes.'}</div>${t.habitPlan?.cue ? `<p class="small">Cue · ${esc(t.habitPlan.cue)}</p>` : ''}<div class="actions row wrap">${btn('Start 2-minute burst →', 'burst', t.id, 'primary')}${btn('Make it smaller', 'breakdown', t.id, 'text')}${btn('✓ Done', 'complete', t.id, 'text')}${btn('Choose another move','picker','','text')}</div>` : cleared ? `<p class="hero-description">You finished what you chose for today. Take a break, or leave it here.</p><div class="actions row wrap">${btn('Take a break →', 'break-space', '', 'primary')}${btn('Close the day', 'end-day', '', 'text')}</div>` : `<p class="hero-description">${waitingTask?`${esc(waitingTask.title)} is saved for later today. You don’t need to repeat it right now.`:'Add what you want to do. We’ll keep the next step in view.'}</p><div class="actions row wrap">${btn('+ Add one thing', 'new-task', '', 'primary')}${btn('Pick something for me →', 'picker', '', 'text')}</div>`}
+      ${active ? `<p class="hero-description">${active.local?'This session is saved on this device and will sync when finished.':active.mode==='focus'?'Your session follows you between devices. Your place is kept.':'A break is underway. Look away, stretch, or get water.'}</p><div class="actions row wrap">${btn(active.mode==='focus'?'Return to my session →':'Return to my break →','nav','focus','primary')}</div>` : t ? `<div class="task-meta"><span>${esc(t.category)}</span><span>${t.minutes} MIN ESTIMATE</span><span>${esc(t.energy)} energy</span></div><div class="first-step"><span>YOUR FIRST MOVE</span>${nextAction ? esc(nextAction) : first ? `<button class="step-start" data-action="step" data-id="${esc(t.id)}" data-step="${esc(first.id)}" aria-label="Complete step ${esc(first.title)}"><span aria-hidden="true">○</span>${esc(first.title)}</button>` : 'Choose one action you can do in the next two minutes.'}</div>${t.habitPlan?.cue ? `<p class="small">Cue · ${esc(t.habitPlan.cue)}</p>` : ''}<div class="actions row wrap">${btn('Start 2-minute burst →', 'burst', t.id, 'primary')}${btn('Make it smaller', 'breakdown', t.id, 'text')}${btn('✓ Done', 'complete', t.id, 'text')}${btn('Choose another move','picker','','text')}</div>` : cleared ? `<p class="hero-description">You finished what you chose for today. Take a break, or leave it here.</p><div class="actions row wrap">${btn('Take a break →', 'break-space', '', 'primary')}${btn('Close the day', 'end-day', '', 'text')}</div>` : `<p class="hero-description">${waitingTask?`${esc(waitingTask.title)} is saved for later today. You don’t need to repeat it right now.`:'Add what you want to do. We’ll keep the next step in view.'}</p><div class="actions row wrap">${btn('+ Add one thing', 'new-task', '', 'primary')}${btn('Pick something for me →', 'picker', '', 'text')}</div>`}
     </section>
     <section class="timer-panel" aria-label="Focus timer"><div class="timer-heading"><span class="eyebrow">${(state.timer?.mode || timerMode) === 'focus' ? 'FOCUS SESSION' : 'BREAK SESSION'}</span><span class="timer-dot" aria-hidden="true"></span></div>${timerModes()}<div class="timer-time" data-timer>${timeText(state.timer ? remaining(state.timer) : duration * 60)}</div><p class="small">${state.timer ? (state.timer.status === 'paused' ? 'Paused. Resume when you’re ready.' : state.timer.mode === 'focus' ? 'Your only job: stay with this task.' : 'Get up. Stretch. Look away.') : timerMode === 'focus' ? 'Two minutes is a valid start.' : 'Get up. Stretch. Look away.'}</p>${state.timer ? timerControls() : durations() + timerControls()}${btn('Open focus space ↗', 'nav', 'focus', 'text compact')}</section>
   </div>
@@ -340,9 +462,9 @@ function baseNowPage() {
   <div class="support-grid"><section class="support"><div class="row spread"><h3>Thought parking</h3><span class="kbd">C</span></div><p>Catch the thought. Keep your place.</p><form data-form="capture-inline" class="capture-bar"><input name="text" aria-label="Capture a thought" placeholder="What just popped into your head?" required maxlength="3000">${btn('Save →', 'submit', '', 'soft', 'type="submit" aria-label="Save thought"')}</form></section><section class="support restart-panel"><span class="eyebrow">A FRESH START</span><h3>Lost your thread?</h3><p>Restart with a two-minute session.</p><div class="row wrap">${btn('Help me restart →', 'restart', '', 'secondary')}${btn('Close the day', 'end-day', '', 'text compact')}</div></section></div>`;
 }
 function tasksPage() {
-  let tasks = state.tasks.filter(t => taskTab === 'deleted' ? t.deleted : !t.deleted && (taskTab === 'habits' ? t.repeat !== 'none' : taskTab === 'completed' ? done(t, today()) : (taskTab === 'all' || t.lane === taskTab) && !done(t, today()) && (t.repeat==='none'||isDue(t,today()))));
-  tasks = tasks.filter(t => (!search || t.title.toLowerCase().includes(search.toLowerCase())) && (!category || t.category === category)).sort((a, b) => a.order - b.order);
-  return heading('Your tasks.', 'Tasks you can act on now. Habits that are resting stay in Habits.', btn('+ New task', 'new-task', '', 'primary')) + `<form class="capture-bar" data-form="quick-task"><span aria-hidden="true">+</span><input name="title" aria-label="Quickly add a task" placeholder="Add a task. Details can wait…" required maxlength="300">${btn('Add task', 'submit', '', 'soft', 'type="submit"')}</form><div class="tabs" aria-label="Task lists">${[['all', 'All open'], ['today', 'Today'], ['habits', 'Habits'], ['completed', 'Done'], ['deleted', 'Deleted']].map(([id, name]) => `<button data-action="task-tab" data-id="${id}" class="${taskTab === id ? 'active' : ''}" aria-pressed="${taskTab === id}">${name}</button>`).join('')}</div><div class="filter-row"><input id="task-search" type="search" placeholder="Find a task…" aria-label="Search tasks" value="${esc(search)}"><select id="category-filter" aria-label="Filter by category"><option value="">All categories</option>${state.categories.map(c => `<option ${category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><span class="small muted">${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}</span></div><section class="task-list">${tasks.length ? tasks.map(t => t.deleted ? `<div class="task-row"><div class="task-content"><div class="task-title-line"><span class="task-title">${esc(t.title)}</span>${taskFlame(t)}</div><p class="small">Safe to bring back.</p></div><div class="row wrap">${btn('Restore', 'restore', t.id, 'soft compact')}${btn('Delete forever', 'purge-task', t.id, 'text compact danger')}</div></div>` : taskRow(t)).join('') : `<div class="empty"><h3>${taskTab === 'completed' ? 'Small wins will live here.' : taskTab === 'deleted' ? 'Nothing to restore.' : 'A little breathing room.'}</h3><p>${search || category ? 'Try another search or category.' : taskTab === 'habits' ? 'Create a task with a repeat interval to build a gentle routine.' : 'Add something when it comes to mind. There’s no need to fill the space.'}</p>${taskTab !== 'deleted' ? btn('+ Add a task', 'new-task', '', 'soft') : ''}</div>`}</section><p class="footer-note">All open shows habits when due. Habits shows every routine, including rest days. Today holds up to three tasks.</p>`;
+  let tasks = state.tasks.filter(t => taskTab === 'deleted' ? t.deleted : !t.deleted && (taskTab === 'habits' ? t.repeat !== 'none' : taskTab === 'completed' ? done(t, today()) : (taskTab === 'all' || t.lane === taskTab) && !done(t, today()) && (t.repeat==='none'||t.workStatus==='waiting'||isDue(t,today()))));
+  tasks = tasks.filter(t => (!search || t.title.toLowerCase().includes(search.toLowerCase())) && (!category || t.category === category) && (!taskProject || (taskProject==='unassigned' ? !t.projectId : t.projectId===taskProject)) && (!taskStatus || t.workStatus===taskStatus)).sort((a, b) => a.order - b.order);
+  return heading('Your tasks.', 'Tasks you can act on now. Habits that are resting stay in Habits.', btn('+ New task', 'new-task', '', 'primary')) + `<form class="capture-bar" data-form="quick-task"><span aria-hidden="true">+</span><input name="title" aria-label="Quickly add a task" placeholder="Add a task. Details can wait…" required maxlength="300">${btn('Add task', 'submit', '', 'soft', 'type="submit"')}</form><div class="tabs" aria-label="Task lists">${[['all', 'All open'], ['today', 'Today'], ['habits', 'Habits'], ['completed', 'Done'], ['deleted', 'Deleted']].map(([id, name]) => `<button data-action="task-tab" data-id="${id}" class="${taskTab === id ? 'active' : ''}" aria-pressed="${taskTab === id}">${name}</button>`).join('')}</div><div class="filter-row"><input id="task-search" type="search" placeholder="Find a task…" aria-label="Search tasks" value="${esc(search)}"><select id="category-filter" aria-label="Filter by category"><option value="">All categories</option>${state.categories.map(c => `<option ${category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><select id="project-filter" aria-label="Filter by project"><option value="">All projects</option><option value="unassigned" ${taskProject==='unassigned'?'selected':''}>No project</option>${state.projects.map(project=>`<option value="${esc(project.id)}" ${taskProject===project.id?'selected':''}>${esc(project.title)}</option>`).join('')}</select><select id="task-status-filter" aria-label="Filter by task status"><option value="">All statuses</option><option value="ready" ${taskStatus==='ready'?'selected':''}>Ready</option><option value="waiting" ${taskStatus==='waiting'?'selected':''}>Waiting / blocked</option></select><span class="small muted">${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}</span></div><section class="task-list">${tasks.length ? tasks.map(t => t.deleted ? `<div class="task-row"><div class="task-content"><div class="task-title-line"><span class="task-title">${esc(t.title)}</span>${taskFlame(t)}</div><p class="small">Safe to bring back.</p></div><div class="row wrap">${btn('Restore', 'restore', t.id, 'soft compact')}${btn('Delete forever', 'purge-task', t.id, 'text compact danger')}</div></div>` : taskRow(t)).join('') : `<div class="empty"><h3>${taskTab === 'completed' ? 'Small wins will live here.' : taskTab === 'deleted' ? 'Nothing to restore.' : 'A little breathing room.'}</h3><p>${search || category ? 'Try another search or category.' : taskTab === 'habits' ? 'Create a task with a repeat interval to build a gentle routine.' : 'Add something when it comes to mind. There’s no need to fill the space.'}</p>${taskTab !== 'deleted' ? btn('+ Add a task', 'new-task', '', 'soft') : ''}</div>`}</section><p class="footer-note">All open shows habits when due. Habits shows every routine, including rest days. Today holds up to three tasks.</p>`;
 }
 function planPage() {
   const calendar = calendarPanel(state,planDate,calendarView,today());
@@ -404,16 +526,18 @@ function phoneSettings(){
 function mobileNavigationSettings(){const pages=state.settings.mobilePages||['now','tasks','plan','focus'];return `<section class="settings-panel mobile-navigation-settings"><h2>Mobile navigation</h2><p class="small">Choose the first four pages, in order. More always opens all pages.</p><form data-form="mobile-nav"><div class="form-grid">${pages.map((id,i)=>select(`Position ${i+1}`,'slot'+i,navItems.filter(n=>n[0]!=='rewards'||state.settings.gamification).map(n=>[n[0],n[2]]),id)).join('')}</div>${btn('Save mobile navigation','submit','','secondary','type="submit"')}</form></section>`;}
 function settingsPage() {
   const s = state.settings;
-  return `<section class="settings-panel"><h2>Calendar appearance</h2><p class="small">Today is always highlighted. Choose how elapsed days look.</p><form data-form="calendar-appearance">${select('Past days','calendarPastStyle',[['gray','Gray out past days'],['cross','Draw an X over past days']],s.calendarPastStyle||'gray')}${btn('Save calendar appearance','submit','','secondary','type="submit"')}</form></section>`+mobileNavigationSettings()+heading('Tune your workspace.', 'Adjust the rhythm, the look, and your connections.') + engagementSettings() + rewardSettings() + phoneSettings() + `<section class="guide-settings row spread wrap"><div><h3>Keep your workspace within reach</h3><p class="small">Open the same home-server address on every device. Add it to your phone’s home screen for a quick return.</p></div>${btn('Add to my home screen','install-help','','secondary')}</section>` + `<section class="guide-settings row spread wrap"><div><h3>Learn the daily loop</h3><p class="small">Replay the page-by-page guide. Your tasks and preferences stay intact.</p></div>${btn(state.onboarding?.status==='paused'?'Resume setup guide':state.onboarding?.status==='active'?'Restart setup guide':'Replay setup guide',state.onboarding?.status==='active'?'guide-restart':'guide-start','','secondary')}${state.onboarding?.status==='paused'?btn('Start guide from beginning','guide-restart','','text compact'):''}</section><form data-form="settings"><div class="settings-grid"><section class="settings-panel"><h2>Your space</h2>${field('What should we call you?', 'name', s.name, 'text', 'maxlength="60"')}${select('Appearance', 'theme', [['light', 'Daylight'], ['dark', 'Evening'], ['system', 'Follow my device']], s.theme)}${field('Timezone', 'timezone', s.timezone, 'text', 'required')}${select('Timer typeface', 'timerFont', [['sans', 'Simple'], ['mono', 'Monospace'], ['serif', 'Bookish']], s.timerFont)}${switchField('lowStim', 'Less visual stimulation', 'Quiet surfaces and fewer supporting panels.')}${switchField('reducedMotion', 'Reduce motion', 'Remove interface transitions.')}${switchField('showStreaks', 'Show task streaks', 'Show recent runs of check-offs beside tasks.')}${switchField('disableLetterShortcuts', 'Disable single-letter shortcuts', 'Use buttons instead of C, N and F.')}${switchField('gamification', 'Rewards & gentle goals', 'Show coins and milestones. Turn off whenever you prefer.')}</section><section class="settings-panel"><h2>Your rhythm</h2><div class="form-grid">${field('Focus (minutes)', 'focusMinutes', s.focusMinutes, 'number', 'min="1" max="120" required')}${field('Short break', 'shortBreak', s.shortBreak, 'number', 'min="1" max="120" required')}${field('Long break', 'longBreak', s.longBreak, 'number', 'min="1" max="120" required')}${field('Sessions before long break', 'cycles', s.cycles, 'number', 'min="1" max="8" required')}${field('Full-session threshold (%)', 'partialThreshold', s.partialThreshold, 'number', 'min="50" max="100" required')}${field('Daily session goal', 'dailyGoal', s.dailyGoal, 'number', 'min="1" max="10" required')}</div>${switchField('sound', 'A gentle finish sound', 'A single chime when a timer ends.')}${switchField('quietFocus', 'Quiet focus', 'Keep Today simpler and reduce nonessential focus alerts.')}${switchField('autoBreak', 'Start a break after focus', 'Move straight into a short or long break.')}${field('Sound volume', 'volume', s.volume, 'range', 'min="0" max="1" step="0.05"')}<p class="small muted">All completed focus minutes earn credit. The threshold only decides whether a session counts as full.</p></section></div><div class="row" style="margin:22px 0">${btn('Save preferences', 'submit', '', 'primary', 'type="submit"')}<span class="error-text" id="settings-error"></span></div></form><div class="settings-grid"><section class="settings-panel"><h2>Keep your data safe</h2><p class="small" style="margin-bottom:17px">Export an Episuite backup, or import an EpiApps / Epimix backup. Import replaces the matching records and saves a server backup first.</p><div class="row wrap"><a class="btn secondary" href="/api/export" download="episuite-backup.json">Export backup ↓</a>${btn('Import backup', 'import', '', 'secondary')}<input id="import-file" type="file" accept="application/json,.json" hidden></div><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Categories</h3><div class="row wrap" style="margin:15px 0">${state.categories.map(c => `<span class="pill">${esc(c)}${c !== 'Personal' ? `<button data-action="delete-category" data-id="${esc(c)}" aria-label="Remove ${esc(c)}"> ×</button>` : ''}</span>`).join('')}</div><form data-form="category" class="row"><input name="name" aria-label="New category name" placeholder="New category" required maxlength="50">${btn('Add', 'submit', '', 'soft', 'type="submit"')}</form></section><section class="settings-panel"><h2>Calendar connection</h2><p class="small" style="margin-bottom:17px">Export an .ics file from My day, or sync to a CalDAV calendar. Use the full calendar collection URL.</p><form data-form="calendar">${field('Calendar collection URL', 'url', state.calendar.url, 'url')}${field('Username', 'username', state.calendar.username)}${field('Password / app password', 'password', '', 'password', `autocomplete="new-password" placeholder="${state.calendar.configured ? 'Saved; leave blank to keep' : ''}"`)}<div class="row wrap">${btn('Save connection', 'submit', '', 'secondary', 'type="submit"')}${btn('Sync today', 'calendar-sync', '', 'soft')}${btn('Remove synced events', 'calendar-remove', '', 'text compact')}</div></form><p class="small muted" style="margin-top:13px">Credentials stay on your server and are excluded from exports. Live sync needs a reachable CalDAV server.</p></section><section class="settings-panel"><h2>A little help getting started</h2><p class="small" style="margin-bottom:15px">Optional local AI can turn a task into smaller actions. Connect Ollama on your home server (see the Docker setup in the README). Manual steps always work.</p><form data-form="ai-settings">${field('Ollama model', 'ollamaModel', s.ollamaModel)}${btn('Save model', 'submit', '', 'secondary', 'type="submit"')}</form><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Your background</h3><p class="small">A quiet image, if it helps you. JPG, PNG or WebP, up to 1 MB.</p><input id="background-file" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose background image" style="margin:14px 0">${btn('Remove background', 'remove-background', '', 'text compact')}<h3 style="margin-top:22px">Optional focus video</h3><p class="small">Muted, behind the focus screen only. Saved on this browser. Up to 30 MB; hidden in low-stimulation or reduced-motion mode.</p><input id="video-file" type="file" accept="video/mp4,video/webm" aria-label="Choose focus background video" style="margin:14px 0">${btn('Remove video', 'remove-video', '', 'text compact')}</section><section class="settings-panel"><h2>Connect your watch</h2><p class="small">The included EpiBlock Zepp app can read your day through <code>/api/v1/day</code>. Point its server setting at this app’s reachable address. See the README for the watch display update and LAN setup.</p><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Using Episuite</h3><p class="small">Press C to capture, N for a task, and F for focus. You can disable single-letter shortcuts above. In the Focus screen, Space pauses or resumes. Quiet view keeps the rest of the workspace out of sight.</p><p class="small" style="margin-top:15px">Episuite supports your workflow. Its ADHD usefulness score is a simulated usability assessment, not a clinical result.</p></section></div>`;
+  return `<section class="settings-panel"><h2>Calendar appearance</h2><p class="small">Today is always highlighted. Choose how elapsed days look.</p><form data-form="calendar-appearance">${select('Past days','calendarPastStyle',[['gray','Gray out past days'],['cross','Draw an X over past days']],s.calendarPastStyle||'gray')}${btn('Save calendar appearance','submit','','secondary','type="submit"')}</form></section>`+mobileNavigationSettings()+heading('Tune your workspace.', 'Adjust the rhythm, the look, and your connections.') + engagementSettings() + rewardSettings() + phoneSettings() + `<section class="guide-settings row spread wrap"><div><h3>Keep your workspace within reach</h3><p class="small">Open the same home-server address on every device. Add it to your phone’s home screen for a quick return.</p></div>${btn('Add to my home screen','install-help','','secondary')}</section>` + `<section class="guide-settings row spread wrap"><div><h3>Learn the daily loop</h3><p class="small">Replay the page-by-page guide. Your tasks and preferences stay intact.</p></div>${btn(state.onboarding?.status==='paused'?'Resume setup guide':state.onboarding?.status==='active'?'Restart setup guide':'Replay setup guide',state.onboarding?.status==='active'?'guide-restart':'guide-start','','secondary')}${state.onboarding?.status==='paused'?btn('Start guide from beginning','guide-restart','','text compact'):''}</section><form data-form="settings"><div class="settings-grid"><section class="settings-panel"><h2>Your space</h2>${field('What should we call you?', 'name', s.name, 'text', 'maxlength="60"')}${select('Appearance', 'theme', [['light', 'Daylight'], ['dark', 'Evening'], ['system', 'Follow my device']], s.theme)}${field('Timezone', 'timezone', s.timezone, 'text', 'required')}${select('Timer typeface', 'timerFont', [['sans', 'Simple'], ['mono', 'Monospace'], ['serif', 'Bookish']], s.timerFont)}${switchField('lowStim', 'Less visual stimulation', 'Quiet surfaces and fewer supporting panels.')}${switchField('reducedMotion', 'Reduce motion', 'Remove interface transitions.')}${switchField('showStreaks', 'Show task streaks', 'Show recent runs of check-offs beside tasks.')}${switchField('disableLetterShortcuts', 'Disable single-letter shortcuts', 'Use buttons instead of C, N and F.')}${switchField('gamification', 'Rewards & gentle goals', 'Show coins and milestones. Turn off whenever you prefer.')}</section><section class="settings-panel"><h2>Your rhythm</h2><div class="form-grid">${field('Focus (minutes)', 'focusMinutes', s.focusMinutes, 'number', 'min="1" max="120" required')}${field('Short break', 'shortBreak', s.shortBreak, 'number', 'min="1" max="120" required')}${field('Long break', 'longBreak', s.longBreak, 'number', 'min="1" max="120" required')}${field('Sessions before long break', 'cycles', s.cycles, 'number', 'min="1" max="8" required')}${field('Full-session threshold (%)', 'partialThreshold', s.partialThreshold, 'number', 'min="50" max="100" required')}${field('Daily session goal', 'dailyGoal', s.dailyGoal, 'number', 'min="1" max="10" required')}</div>${switchField('sound', 'A gentle finish sound', 'A single chime when a timer ends.')}${switchField('quietFocus', 'Quiet focus', 'Keep Today simpler and reduce nonessential focus alerts.')}${switchField('autoBreak', 'Start a break after focus', 'Move straight into a short or long break.')}${field('Sound volume', 'volume', s.volume, 'range', 'min="0" max="1" step="0.05"')}<p class="small muted">All completed focus minutes earn credit. The threshold only decides whether a session counts as full.</p></section></div><div class="row" style="margin:22px 0">${btn('Save preferences', 'submit', '', 'primary', 'type="submit"')}<span class="error-text" id="settings-error"></span></div></form><div class="settings-grid"><section class="settings-panel"><h2>Keep your data safe</h2>${backupControls()}<p class="small" style="margin-bottom:17px">Export an Episuite backup, or import an EpiApps / Epimix backup. Import replaces the matching records and saves a server backup first.</p><div class="row wrap"><a class="btn secondary" href="/api/export" download="episuite-backup.json">Export backup ↓</a>${btn('Import backup', 'import', '', 'secondary')}<input id="import-file" type="file" accept="application/json,.json" hidden></div><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Categories</h3><div class="row wrap" style="margin:15px 0">${state.categories.map(c => `<span class="pill">${esc(c)}${c !== 'Personal' ? `<button data-action="delete-category" data-id="${esc(c)}" aria-label="Remove ${esc(c)}"> ×</button>` : ''}</span>`).join('')}</div><form data-form="category" class="row"><input name="name" aria-label="New category name" placeholder="New category" required maxlength="50">${btn('Add', 'submit', '', 'soft', 'type="submit"')}</form></section><section class="settings-panel"><h2>Calendar connection</h2><p class="small" style="margin-bottom:17px">Export an .ics file from My day, or sync to a CalDAV calendar. Use the full calendar collection URL.</p><form data-form="calendar">${field('Calendar collection URL', 'url', state.calendar.url, 'url')}${field('Username', 'username', state.calendar.username)}${field('Password / app password', 'password', '', 'password', `autocomplete="new-password" placeholder="${state.calendar.configured ? 'Saved; leave blank to keep' : ''}"`)}<div class="row wrap">${btn('Save connection', 'submit', '', 'secondary', 'type="submit"')}${btn('Sync today', 'calendar-sync', '', 'soft')}${btn('Remove synced events', 'calendar-remove', '', 'text compact')}</div></form><p class="small muted" style="margin-top:13px">Credentials stay on your server and are excluded from exports. Live sync needs a reachable CalDAV server.</p></section><section class="settings-panel"><h2>A little help getting started</h2><p class="small" style="margin-bottom:15px">Optional local AI can turn a task into smaller actions. Connect Ollama on your home server (see the Docker setup in the README). Manual steps always work.</p><form data-form="ai-settings">${field('Ollama model', 'ollamaModel', s.ollamaModel)}${btn('Save model', 'submit', '', 'secondary', 'type="submit"')}</form><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Your background</h3><p class="small">A quiet image, if it helps you. JPG, PNG or WebP, up to 1 MB.</p><input id="background-file" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose background image" style="margin:14px 0">${btn('Remove background', 'remove-background', '', 'text compact')}<h3 style="margin-top:22px">Optional focus video</h3><p class="small">Muted, behind the focus screen only. Saved on this browser. Up to 30 MB; hidden in low-stimulation or reduced-motion mode.</p><input id="video-file" type="file" accept="video/mp4,video/webm" aria-label="Choose focus background video" style="margin:14px 0">${btn('Remove video', 'remove-video', '', 'text compact')}</section><section class="settings-panel"><h2>Connect your watch</h2><p class="small">The included EpiBlock Zepp app can read your day through <code>/api/v1/day</code>. Point its server setting at this app’s reachable address. See the README for the watch display update and LAN setup.</p><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Using Episuite</h3><p class="small">Press C to capture, N for a task, and F for focus. You can disable single-letter shortcuts above. In the Focus screen, Space pauses or resumes. Quiet view keeps the rest of the workspace out of sight.</p><p class="small" style="margin-top:15px">Episuite supports your workflow. Its ADHD usefulness score is a simulated usability assessment, not a clinical result.</p></section></div>`;
 }
 function showDialog(title, content, formName = '', submitLabel = 'Save') {
   const dialog = $('#dialog');
+  drafts.capture();
   delete dialog.dataset.welcome;
   if (!dialog.open) lastFocus = document.activeElement;
   dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title"></h2><button data-action="close-dialog" aria-label="Close dialog">×</button></div>${formName ? `<form data-form="${formName}">` : ''}${content}<div class="error-text" id="dialog-error" role="alert"></div>${formName ? `<div class="dialog-foot">${btn('Cancel', 'close-dialog', '', 'text')}${btn(submitLabel, 'submit', '', 'primary', 'type="submit"')}</div></form>` : ''}`;
   dialog.querySelector('h2').textContent = title;
   dialog.setAttribute('aria-labelledby', 'dialog-title');
   if (!dialog.open) dialog.showModal();
+  queueMicrotask(() => { const form = dialog.querySelector('form[data-form]'); if (form) drafts.restore(form); });
   updateOptionalFields();
   setTimeout(() => {const dialog=$('#dialog');(dialog.querySelector('input:not([type=hidden]),textarea,select') || dialog.querySelector('button'))?.focus({preventScroll:true});dialog.scrollTop=0;}, 0);
 }
@@ -423,10 +547,10 @@ async function installationStatus(){
   return '<section class="installation-status"><strong>'+(installed?'Installed on this device':window.isSecureContext?'Secure connection · installation supported':'HTTPS needed for full phone installation')+'</strong><p class="small">'+(ready?'Offline workspace is ready. Saved data can reopen; captures queue until your server returns.':window.isSecureContext?'Offline cache is preparing. Keep the app open briefly, then reopen this panel.':'Tasks, calendar and Social work here while connected. Use your Tailscale HTTPS address for installation.')+'</p></section>';
 }
 window.addEventListener('appinstalled',()=>{installPrompt=null;toast('Episuite installed. Open it from your home screen.');});
-function closeDialog() { $('#dialog').close(); lastFocus?.focus(); }
-function taskDialog(id) {
-  const t = id ? taskById(id) : { title: '', description: '', category: 'Personal', minutes: 15, energy: 'medium', difficulty: 1, repeat: 'none', target: 1, due: '', lane: page === 'now' ? 'today' : 'inbox', steps: [] };
-  showDialog(id ? 'Make this task work for you' : 'One thing on your mind', `<input type="hidden" name="expectedVersion" value="${t.editVersion||0}"><input type="hidden" name="id" value="${esc(id || '')}">${field('What do you want to do?', 'title', t.title, 'text', 'required maxlength="300"')}<div class="form-grid">${select('Show in today’s selection?', 'lane', [['inbox', 'All tasks'], ['today', 'Select for today · up to three']], t.lane==='later'?'inbox':t.lane)}${field('Roughly how many minutes?', 'minutes', t.minutes, 'number', 'min="1" max="480" required')}</div>${field('Next action (optional)', 'nextAction', t.nextAction, 'text', 'maxlength="240"')}<details class="task-details"><summary>Categories, habits & tiny steps</summary><div class="form-grid">${select('Category', 'category', state.categories.map(c => [c, c]), t.category)}${select('Energy needed', 'energy', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], t.energy)}${select('How much effort?', 'difficulty', [[1, 'Small · 5 coins'], [2, 'Medium · 10 coins'], [3, 'Big · 20 coins']], t.difficulty)}${field('Due date (optional)', 'due', t.due, 'date')}${select('Repeat', 'repeat', [['none', 'Just once'], ['daily', 'Every day'], ['weekly', 'Every week'], ['interval_0.5', 'Twice a day'], ['interval_3', 'Every 3 days'], ['interval_7', 'Every 7 days'], ['custom', 'Custom interval']], /^(none|daily|weekly|interval_0.5|interval_3|interval_7)$/.test(t.repeat) ? t.repeat : 'custom')}${field('Minimum time between daily repeats (minutes)', 'minimumGapMinutes', t.minimumGapMinutes ?? (t.repeat === 'interval_0.5' ? 360 : 0), 'number', 'min="0" max="1440" required')}${field('Custom interval (days)', 'interval', t.repeat.startsWith('interval_') ? t.repeat.slice(9) : 2, 'number', 'min="0.05" max="365" step="0.05"')}</div><fieldset id="habit-plan"><legend>Habit plan (optional)</legend>${field('After this cue…', 'habitCue', t.habitPlan?.cue, 'text', 'maxlength="240"')}${field('Smallest useful version', 'habitMinimum', t.habitPlan?.minimum, 'text', 'maxlength="240"')}${field('If I get stuck, I will…', 'habitObstacle', t.habitPlan?.obstacle, 'text', 'maxlength="240"')}</fieldset><div class="field"><label for="task-description">A note to your future self</label><textarea name="description" id="task-description" maxlength="3000">${esc(t.description)}</textarea></div><div class="field"><label for="task-steps">Tiny steps (one per line)</label><textarea name="steps" id="task-steps" placeholder="Open the document\nWrite the first sentence">${esc(t.steps.map(s => s.title).join('\n'))}</textarea></div></details>${id ? `<div class="row wrap">${btn('Break into small steps', 'ai-steps', id, 'soft compact')}${btn('Delete task', 'delete-task', id, 'text compact danger')}</div>` : ''}`, 'task', id ? 'Save task' : 'Add task');
+function closeDialog() { drafts.capture(); $('#dialog').close(); lastFocus?.focus(); }
+function taskDialog(id, projectId = '') {
+  const t = id ? taskById(id) : { projectId, title: '', description: '', category: 'Personal', minutes: 15, energy: 'medium', difficulty: 1, repeat: 'none', target: 1, due: '', lane: page === 'now' ? 'today' : 'inbox', steps: [] };
+  showDialog(id ? 'Make this task work for you' : 'One thing on your mind', `<input type="hidden" name="expectedVersion" value="${t.editVersion||0}"><input type="hidden" name="id" value="${esc(id || '')}"><input type="hidden" name="draftKey" value="${esc(id || projectId || 'new')}">${field('What do you want to do?', 'title', t.title, 'text', 'required maxlength="300"')}<div class="form-grid">${select('Show in today’s selection?', 'lane', [['inbox', 'All tasks'], ['today', 'Select for today · up to three']], t.lane==='later'?'inbox':t.lane)}${field('Roughly how many minutes?', 'minutes', t.minutes, 'number', 'min="1" max="480" required')}</div>${field('Next action (optional)', 'nextAction', t.nextAction, 'text', 'maxlength="240"')}${select('Project', 'projectId', [['','No project'],...(state.projects||[]).map(project=>[project.id,project.title])],t.projectId||'')}${select('Task status','workStatus',[['ready','Ready'],['waiting','Waiting / blocked']],t.workStatus||'ready')}${field('Waiting for (optional)','waitingFor',t.waitingFor||'','text','maxlength="300"')}<details class="task-details"><summary>Categories, habits & tiny steps</summary><div class="form-grid">${select('Category', 'category', state.categories.map(c => [c, c]), t.category)}${select('Energy needed', 'energy', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], t.energy)}${select('How much effort?', 'difficulty', [[1, 'Small · 5 coins'], [2, 'Medium · 10 coins'], [3, 'Big · 20 coins']], t.difficulty)}${field('Due date (optional)', 'due', t.due, 'date')}${select('Repeat', 'repeat', [['none', 'Just once'], ['daily', 'Every day'], ['weekly', 'Every 7 days after completion'], ['weekdays', 'Chosen weekdays'], ['quota', 'Check-offs per week'], ['interval_0.5', 'Twice a day'], ['interval_3', 'Every 3 days'], ['interval_7', 'Every 7 days'], ['custom', 'Custom interval']], /^(none|daily|weekly|weekdays|quota|interval_0.5|interval_3|interval_7)$/.test(t.repeat) ? t.repeat : 'custom')}${field('Minimum time between daily repeats (minutes)', 'minimumGapMinutes', t.minimumGapMinutes ?? (t.repeat === 'interval_0.5' ? 360 : 0), 'number', 'min="0" max="1440" required')}${field('Custom interval (days)', 'interval', t.repeat.startsWith('interval_') ? t.repeat.slice(9) : 2, 'number', 'min="0.05" max="365" step="0.05"')}</div><fieldset id="habit-weekdays"><legend>Habit days</legend>${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((name,day)=>`<label><input type="checkbox" name="weekdays" value="${day}" ${(t.weekdays||[1,2,3,4,5]).includes(day)?'checked':''}> ${name}</label>`).join('')}</fieldset>${field('Check-offs per week', 'weeklyTarget', t.weeklyTarget || 3, 'number', 'min="1" max="20" step="1"')}<fieldset id="habit-plan"><legend>Habit plan (optional)</legend>${field('After this cue…', 'habitCue', t.habitPlan?.cue, 'text', 'maxlength="240"')}${field('Smallest useful version', 'habitMinimum', t.habitPlan?.minimum, 'text', 'maxlength="240"')}${field('If I get stuck, I will…', 'habitObstacle', t.habitPlan?.obstacle, 'text', 'maxlength="240"')}</fieldset><div class="field"><label for="task-description">A note to your future self</label><textarea name="description" id="task-description" maxlength="3000">${esc(t.description)}</textarea></div><div class="field"><label for="task-steps">Tiny steps (one per line)</label><textarea name="steps" id="task-steps" placeholder="Open the document\nWrite the first sentence">${esc(t.steps.map(s => s.title).join('\n'))}</textarea></div></details>${id ? `<div class="row wrap">${btn('Break into small steps', 'ai-steps', id, 'soft compact')}${btn('Delete task', 'delete-task', id, 'text compact danger')}</div>` : ''}`, 'task', id ? 'Save task' : 'Add task');
 }
 function blockDialog(id) {
   const remote=state.blocks.find(b=>b.id===id);
@@ -440,6 +564,8 @@ function updateOptionalFields() {
   const repeat = $('#dialog #f-repeat'), interval = $('#dialog #f-interval');
   if (repeat && interval) interval.closest('.field').hidden = repeat.value !== 'custom';
   if (repeat && $('#habit-plan')) $('#habit-plan').hidden = repeat.value === 'none';
+  if (repeat && $('#habit-weekdays')) $('#habit-weekdays').hidden = repeat.value !== 'weekdays';
+  if (repeat && $('#f-weeklyTarget')) $('#f-weeklyTarget').closest('.field').hidden = repeat.value !== 'quota';
   const gap=$('#dialog #f-minimumGapMinutes');if(gap&&repeat){const multi=repeat.value==='interval_0.5'||(repeat.value==='custom'&&Number(interval?.value)<1);gap.closest('.field').hidden=!multi;}
   const mode = $('#dialog #f-mode'), start = $('#dialog #f-start'), offset = $('#dialog #f-offset');
   if (mode && start && offset) { start.closest('.field').hidden = mode.value !== 'fixed'; offset.closest('.field').hidden = mode.value !== 'relative'; }
@@ -454,6 +580,13 @@ async function onTimerComplete(timer,priorKeepsakes) {
 }
 function updateTimer() {
   lifeUI.update();
+  if (state?.timer?.local && state.timer.status === 'running' && remaining(state.timer) === 0 && !localTimerFinishing) {
+    localTimerFinishing = true;
+    request('/api/timer/finish', { timerId: state.timer.id }).then(() => {
+      timerMode = 'short'; duration = state.settings.shortBreak; render();
+      toast('Local focus saved. It will sync when connected.');
+    }).catch(error => toast(error.message)).finally(() => { localTimerFinishing = false; });
+  }
   if(state?.timer?.mode==='focus'){
     const seconds=Math.max(0,state.timer.duration-remaining(state.timer));
     const bar=$('[data-session-progress]');if(bar)bar.value=Math.min(100,100*seconds/state.timer.duration);
@@ -487,12 +620,65 @@ const litDays=new Set();
 function flameKey(){return `episuite.flame:${state.workspaceId}:${today()}`;}
 function shouldIgnite(){if(!streak(state,today()).active||state.settings.reducedMotion||state.settings.lowStim)return false;try{return !litDays.has(flameKey())&&!localStorage.getItem(flameKey());}catch{return !litDays.has(flameKey());}}
 const lifeUI=lifeTools({getState:()=>state,request,render,showDialog,closeDialog,field,btn,esc,today,timeText,remaining,taskById,action});
+const projectsUI = projectTools({getState:()=>state,request,render,showDialog,closeDialog,field,select,toast});
+const historyUI = taskHistoryTools({getState:()=>state,today,request,showDialog,closeDialog,render,field,select,button:(label,action,id)=>btn(label,action,id,'secondary compact','type="button"'),toast,heatmap,habitSummary});
+const backupsUI = backupTools({request,getState:()=>state,render,showDialog,closeDialog,field,toast});
+const drafts = draftRecovery({workspace:()=>state?.workspaceId,dialog:$('#dialog'),notify:toast,refreshFields:updateOptionalFields});
 const booksUI = bookTools({getState:()=>state,request,render,showDialog,closeDialog,field,select,today,toast});
 async function action(name, id, el) {
   if (await booksUI.handle(name, id)) return;
+  if (await projectsUI.handle(name, id)) return;
+  if (await historyUI.handle(name, id)) return;
+  if (await backupsUI.handle(name, id)) return;
   if(await lifeUI.handle(name,id,el))return;
 
   switch (name) {
+    case 'pending-changes': {
+      const changes = await pendingOperations(state.workspaceId);
+      showDialog('Saved changes', changes.map(change => {
+        const entity = change.kind === 'task-complete' ? taskById(change.entityId) : state.reading.books.find(book => book.id === change.entityId);
+        return `<article class="note-row"><h3>${esc(entity?.title || (change.kind === 'focus-session' ? 'Focus session' : 'Removed item'))}</h3><p class="small">${esc(change.date)} · ${esc(change.kind.replaceAll('-', ' '))}</p>
+          ${change.error ? `<p role="status">${esc(change.error)}</p>` : '<p class="small">Will sync when the server is available.</p>'}
+          <div class="row wrap">${btn('Review and retry','pending-review',change.id,'secondary compact')}${btn('Discard change','pending-discard',change.id,'text compact')}</div></article>`;
+      }).join('') || '<p>Everything is synced.</p>');
+      return;
+    }
+    case 'pending-review': {
+      const change = (await pendingOperations(state.workspaceId)).find(item => item.id === id);
+      if (!change) return;
+      const book = state.reading.books.find(item => item.id === change.entityId);
+      showDialog('Review saved change', `<input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="expectedVersion" value="${book?.editVersion ?? 0}">
+        ${book ? `<p>Server’s current position · page ${book.currentPage}</p>` : ''}
+        ${field('Activity date','date',change.date,'date',`required max="${today()}"`)}
+        ${change.kind.startsWith('reading-') && change.kind !== 'reading-delete' ? field('Starting page','from',change.data.from ?? 0,'number','min="0" required') + field('Page reached','page',change.data.page,'number','min="1" required') : ''}
+        <p class="small">Review these values before retrying against the latest saved version.</p>`, 'pending-operation', 'Retry change');
+      return;
+    }
+    case 'pending-discard':
+      showDialog('Discard saved change?', `<p>This removes this pending activity from this device.</p>${btn('Discard change','pending-confirm-discard',id,'danger')}`);
+      return;
+    case 'pending-confirm-discard': {
+      const workspace = state.workspaceId;
+      const deviceTimer = state.timer?.local ? structuredClone(state.timer) : null;
+      const discarded = (await pendingOperations(workspace)).find(operation => operation.id === id);
+      await acknowledgeOperation(workspace, id);
+      const base = await confirmedSnapshot(workspace);
+      if (base) {
+        state = base;
+        for (const operation of await pendingOperations(workspace)) {
+          if (operation.status === 'conflict') continue;
+          try {
+            const preview = structuredClone(state);
+            applyOperation(preview, operation, () => ({ coins: 0, baseCoins: 0, rewardTier: 'fixed' }));
+            preview.pendingOperationIds = [...(state.pendingOperationIds || []), operation.id];
+            state = preview;
+          } catch {}
+        }
+      }
+      if (deviceTimer && !(discarded?.kind === 'timer-control' && discarded.data.timerId === deviceTimer.id)) state.timer = deviceTimer;
+      pendingOperationCount = (await pendingOperations(workspace)).length;
+      cache(); closeDialog(); render(); toast('Pending change discarded.'); return;
+    }
     case 'install-help': {
       if(installPrompt){await installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;return;}
       showDialog('Install Episuite',`${await installationStatus()}<p>Use the same address on your devices to keep this workspace and offline capture queue together.</p><p><strong>iPhone / iPad:</strong> open in Safari, tap Share, then Add to Home Screen.</p><p><strong>Android / desktop:</strong> open the browser menu and choose Install app or Add to Home screen when offered.</p><p class="small">${window.isSecureContext?'If the browser has no install button yet, use its menu. On iPhone, choose Share → Add to Home Screen and keep Open as Web App enabled if shown.':'This address uses plain HTTP. For your Tailscale production setup, open the HTTPS .ts.net address printed by Tailscale Serve. elysium:3210 and a LAN IP work for testing, but cannot enable full phone offline installation.'}</p>`);return;
@@ -508,7 +694,7 @@ async function action(name, id, el) {
       const plan = state.dayPlans?.[today()] || {};
       const tasks = state.tasks.filter(task => !task.deleted && (!done(task, today()) || task.id === plan.taskId));
       showDialog('Choose today’s outcome',
-        `<input type="hidden" name="expectedVersion" value="${plan.editVersion || 0}">` +
+        `<input type="hidden" name="draftKey" value="${today()}"><input type="hidden" name="expectedVersion" value="${plan.editVersion || 0}">` +
         select('Task', 'taskId', [['', 'No linked task'], ...tasks.map(task => [task.id, task.title])], plan.taskId || '') +
         field('What would count as progress?', 'outcome', plan.outcome, 'text', 'maxlength="240"'),
         'day-priority', 'Save outcome');
@@ -590,7 +776,6 @@ async function action(name, id, el) {
     case 'graph-color-preset':{const input=document.querySelector('[name="graphAccent"]');input.value=id;previewGraphAccent(id);return;}
     case 'social-remove-photo':$('#dialog .photo-crop')?.dispatchEvent(new Event('crop-dispose'));$('#dialog [name="photo"]').value='';$('#person-photo-preview').src='/icon.svg';return;
     case 'purge-task':{const t=taskById(id);showDialog('Permanently delete task?',`<p><strong>${esc(t.title)}</strong> and its completion history will be removed from this workspace. This cannot be undone here.</p><p class="small muted">Recorded focus time and earned coins stay. Existing backup files are unchanged.</p><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="expectedVersion" value="${t.editVersion||0}">${field('Type DELETE to confirm','confirmation','','text','required pattern="DELETE" autocomplete="off"')}`,'purge-task','Delete forever');return;}
-    case 'task-history': {const t=taskById(id);showDialog(t.title,heatmap(Object.fromEntries(Object.entries(t.history||{}).map(([d,e])=>[d,e.length])),today(),'Completion history')+habitSummary(t,today(),state.settings.timezone));return;}
     case 'unselect-task': await request(`/api/tasks/${id}`,{lane:'inbox'},'PATCH');render();toast('Removed from today. Still in All open.');return;
     case 'submit': return;
     case 'phone-test': await request('/api/notifications/test',{}); toast('Test queued. Check delivery status here in a few seconds.'); return;
@@ -623,6 +808,7 @@ async function action(name, id, el) {
     case 'nav': if(id==='menu'){showDialog('Your workspace','<div class="phone-menu">'+navItems.filter(([key])=>key!=='rewards'||state.settings.gamification).map(([key,,label])=>btn(label,'menu-nav',key,'secondary')).join('')+btn('Settings','menu-nav','settings','secondary')+btn('Install Episuite','install-help','','soft')+'</div>');return;} $('#momentum-win')?.remove();page = id; if (page !== 'focus') soundscape('off'); zen = false; location.hash = page; render(); $('#main')?.focus(); window.scrollTo({top:0,behavior:'instant'}); return;
     case 'quick-capture': showDialog('Put it somewhere safe', '<div class="field"><label for="quick-capture">What’s on your mind?</label><textarea id="quick-capture" name="text" required maxlength="3000" placeholder="A thought, an idea, a reminder…"></textarea></div>', 'capture-dialog', 'Save thought'); return;
     case 'new-task': taskDialog(); return;
+    case 'project-task': taskDialog(undefined, id); return;
     case 'edit-task': taskDialog(id); return;
     case 'close-dialog': closeDialog(); return;
     case 'undo-habit': await request(`/api/tasks/${id}/undo`);render();toast('Last completion undone.');return;
@@ -666,7 +852,7 @@ async function action(name, id, el) {
       const rollover = task && !done(task, today())
         ? `<p>${esc(task.title)}</p>${select('Unfinished priority', 'rollover', [['defer', 'Keep in All tasks'], ['carry', 'Carry as tomorrow’s outcome'], ['schedule', 'Schedule a block tomorrow']], 'defer')}${field('Start time if scheduling', 'start', '09:00', 'time')}`
         : '<p>Unfinished shortlist tasks stay available in All tasks.</p>';
-      showDialog('Close the day', rollover + `<div class="field"><label for="reflection">What helped today? (optional)</label><textarea id="reflection" name="reflection" maxlength="2000"></textarea></div>`, 'end-day', 'Close the day');
+      showDialog('Close the day', `<input type="hidden" name="draftKey" value="${today()}">` + rollover + `<div class="field"><label for="reflection">What helped today? (optional)</label><textarea id="reflection" name="reflection" maxlength="2000"></textarea></div>`, 'end-day', 'Close the day');
       return;
     }
     case 'menu-nav': closeDialog();return action('nav',id);
@@ -748,8 +934,23 @@ document.addEventListener('submit', async event => {
   const data = Object.fromEntries(new FormData(form)), type = form.dataset.form;if(data.color==='custom')data.color=data.customColor; const submit = form.querySelector('[type=submit]');
   try {
     busy = true; if (submit) submit.disabled = true;
-    if (await booksUI.submit(type, data, form)) return;
-    if (type.startsWith('capture')) { await saveCapture(data.text); if (type === 'capture-dialog') closeDialog(); else form.reset(); render(); toast(online ? 'Saved. You can come back to it.' : 'Saved on this device. We’ll sync when your server returns.'); }
+    if (await booksUI.submit(type, data, form)) { drafts.clear(form); return; }
+    if (await projectsUI.submit(type, data, form)) { drafts.clear(form); return; }
+    if (await historyUI.submit(type, data, form)) return;
+    if (await backupsUI.submit(type, data, form)) return;
+    if (type === 'pending-operation') {
+      const operation = (await pendingOperations(state.workspaceId)).find(item => item.id === data.id);
+      if (!operation) throw Error('This change has already synced.');
+      if (operation.kind !== 'timer-control') operation.date = data.date;
+      if (operation.kind.startsWith('reading-')) {
+        Object.assign(operation.data, { expectedVersion: Number(data.expectedVersion), date: data.date });
+        if ('page' in data) Object.assign(operation.data, { page: data.page, from: data.from });
+      }
+      operation.status = 'pending'; delete operation.error;
+      await enqueueOperation(operation);
+      closeDialog(); await load(); render(); return;
+    }
+    if (type.startsWith('capture')) { await saveCapture(data.text); drafts.clear(form); if (type === 'capture-dialog') closeDialog(); else form.reset(); render(); toast(online ? 'Saved. You can come back to it.' : 'Saved on this device. We’ll sync when your server returns.'); }
     else if(type==='calendar-appearance'){await request('/api/settings',{calendarPastStyle:data.calendarPastStyle});render();toast('Calendar appearance saved.');}
     else if(type==='mobile-nav'){const mobilePages=[0,1,2,3].map(i=>data['slot'+i]);if(new Set(mobilePages).size!==4)throw Error('Choose four different pages.');await request('/api/settings',{mobilePages});render();toast('Mobile navigation saved.');}
     else if(type==='life-board'){const payload={graphs:(()=>{const selected=[...new FormData(form).getAll('graphs')],previous=state.life?.board?.graphs||[];return [...previous.filter(id=>selected.includes(id)),...selected.filter(id=>!previous.includes(id))];})(),expectedBoardVersion:Number(data.expectedBoardVersion)};if(data.sectionSettings==='true')payload.graphAccent=data.graphAccent;if(data.sectionSettings==='true')for(const key of ['showFlame','showShortcuts','showTotals'])payload[key]=form.elements[key].checked;await request('/api/life/board',payload);closeDialog();render();toast('Your board, your choices.');}
@@ -770,9 +971,10 @@ document.addEventListener('submit', async event => {
     }
     else if(type==='return-cue'){await request('/api/engagement',{intent:data.intent,cue:data.cue});closeDialog();render();toast('Your cue is ready.');}
     else if (type === 'engagement') { for(const key of ['feedback','novelty','haptics','chime'])data[key]=form.elements[key].checked; await request('/api/engagement',data); $('#momentum-win')?.remove(); render(); toast('Encouragement saved.'); }
-    else if (type === 'quick-task') { await request('/api/tasks', { title: data.title }); form.reset(); render(); toast('Safe in All tasks.'); }
+    else if (type === 'quick-task') { await request('/api/tasks', { title: data.title }); drafts.clear(form); form.reset(); render(); toast('Safe in All tasks.'); }
     else if (type === 'task') {
       const old = taskById(data.id);
+      data.weekdays = new FormData(form).getAll('weekdays').map(Number);
       data.steps = data.steps.split('\n').map(s => s.trim()).filter(Boolean).map(title => old?.steps.find(s => s.title === title) || { id: uid(), title, done: false });
       if (data.repeat === 'custom') data.repeat = `interval_${data.interval}`;
       data.target = data.repeat.startsWith('interval_') ? Math.max(1, Math.round(1 / Number(data.repeat.slice(9)))) : 1;
@@ -792,6 +994,7 @@ document.addEventListener('submit', async event => {
     else if (type === 'category') { await request('/api/categories', data); if ($('#dialog').open) closeDialog(); render(); toast('Category added. You can use it when editing a task.'); }
     else if (type === 'calendar') { await request('/api/calendar/config', data); render(); toast('Calendar connection saved.'); }
     else if (type === 'ai-settings') { await request('/api/settings', data); toast('Local AI model saved.'); }
+    drafts.clear(form);
   } catch (e) { if ($('#dialog').open) $('#dialog-error').textContent = e.message; else if (type === 'settings') $('#settings-error').textContent = e.message; else toast(e.message); }
   finally { busy = false; if (submit) submit.disabled = false; }
 });
@@ -801,6 +1004,8 @@ document.addEventListener('change', async event => {
   if(el.id==='f-repeat'||el.id==='f-interval'){const repeat=$('#f-repeat'),gap=$('#f-minimumGapMinutes');if(gap&&Number(gap.value)===0&&(repeat?.value==='interval_0.5'||(repeat?.value==='custom'&&Number($('#f-interval')?.value)<1)))gap.value=360;updateOptionalFields();}
   if(el.name==='customColor')formColorChoice(el);
   if (el.id === 'f-repeat' || el.id === 'f-mode') updateOptionalFields();
+  if (el.id === 'project-filter') { taskProject = el.value; render(); }
+  if (el.id === 'task-status-filter') { taskStatus = el.value; render(); }
   if (el.id === 'category-filter') { category = el.value; render(); }
   if (el.id === 'plan-date' && el.value) { planDate = el.value; render(); }
   if (el.id === 'focus-task-select') { selectedTask = el.value || null; render(); }

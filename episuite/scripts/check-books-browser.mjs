@@ -34,7 +34,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const save = async () => {
     await page.locator('#dialog [type="submit"]').click();
-    await page.locator('#dialog').waitFor({ state: 'hidden' });
+    await page.locator('#dialog').waitFor({ state: 'hidden' }).catch(async error => { throw new Error(error.message + '\n' + await page.locator('#dialog').innerText() + '\n' + await page.locator('#toast').innerText()); });
   };
   const search = async () => {
     await page.getByRole('button', { name: 'Add a book', exact: true }).click();

@@ -1,4 +1,6 @@
 // Pure functions shared by the server and browser. Dates always use the user's timezone.
+import { scheduledDay, taskProgress, weekStart } from './habit-schedule.js';
+export { taskProgress, weekStart as habitWeekStart } from './habit-schedule.js';
 export function uid(source=globalThis.crypto) {
   if(source.randomUUID)return source.randomUUID();
   // randomUUID requires HTTPS in browsers; getRandomValues also works on a LAN over HTTP.
@@ -11,7 +13,7 @@ export const dateKey = (time = Date.now(), zone = 'Africa/Cairo') => new Intl.Da
 export const addDays = (date, days) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export function initialState() {
   return { version: 1, revision: 0, tasks: [], blocks: [], templates: [], sessions: [], events: [], notes: [], social: {circles:[],people:[],checkins:[]},
-    reading: {books: [], taskId: 'auto', taskVersion: 0, credits: []},
+    reading: {books: [], taskId: 'auto', taskVersion: 0, credits: []}, projects: [], operationReceipts: {},
     categories: ['Personal', 'Work', 'Health', 'Learning', 'Home'],
     settings: { quietFocus: false, showStreaks: true, disableLetterShortcuts: false, calendarPastStyle:'gray', name: '', timezone: 'Africa/Cairo', theme: 'light', focusMinutes: 25, shortBreak: 5, longBreak: 15, cycles: 4, partialThreshold: 90, sound: true, volume: .25, gamification: true, reducedMotion: false, lowStim: false, autoBreak: false, dailyGoal: 2, accent: '#316b57', timerFont: 'sans', background: '', ollamaModel: 'llama3.2' },
     coins: 0, earned: 0, legacyFocus: 0, legacyCompleted: 0, legacyDays: {}, purchases: [],
@@ -19,11 +21,27 @@ export function initialState() {
     redemption: null, timer: null, wake: {}, checkins: {}, blockFeedback: {}, calendar: { url: '', username: '', password: '', eventUrls: {} }, archivedLegacy: null };
 }
 export function finite(value, min, max, fallback) { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; }
-export function taskInput(input, existing = {}) {
+export function taskInput(input, existing = {}, timezone = 'Africa/Cairo') {
   const title = String(input.title ?? existing.title ?? '').trim().slice(0, 300);
   if (!title) throw new InputError('Give this task a name.');
   const repeat = String(input.repeat ?? existing.repeat ?? 'none');
-  if (!/^(none|daily|weekly|interval_\d+(\.\d+)?)$/.test(repeat) || (repeat.startsWith('interval_') && Number(repeat.slice(9)) <= 0)) throw new InputError('Choose a valid repeat interval.');
+  if (!/^(none|daily|weekly|weekdays|quota|interval_\d+(\.\d+)?)$/.test(repeat) || (repeat.startsWith('interval_') && Number(repeat.slice(9)) <= 0)) throw new InputError('Choose a valid repeat interval.');
+  const weekdays = input.weekdays ?? existing.weekdays ?? [1, 2, 3, 4, 5];
+  if (!Array.isArray(weekdays) || weekdays.some(day => !Number.isInteger(Number(day)) || Number(day) < 0 || Number(day) > 6) || (repeat === 'weekdays' && weekdays.length === 0)) throw new InputError('Choose at least one valid weekday.');
+  const weeklyTarget = Number(input.weeklyTarget ?? existing.weeklyTarget ?? 3);
+  if (!Number.isInteger(weeklyTarget) || weeklyTarget < 1 || weeklyTarget > 20) throw new InputError('Choose between 1 and 20 weekly check-offs.');
+  const quotaHistory = [...(existing.quotaHistory || [])];
+  if (quotaHistory.some(entry => !validDate(entry.from) || !Number.isInteger(entry.target) || entry.target < 1 || entry.target > 20)) throw new InputError('Invalid weekly quota history.');
+  if (repeat === 'quota') {
+    if (!quotaHistory.length) quotaHistory.push({ from: weekStart(dateKey(existing.created || Date.now(), timezone)), target: existing.weeklyTarget || weeklyTarget });
+    if (weeklyTarget !== (existing.weeklyTarget || weeklyTarget)) {
+      const from = weekStart(dateKey(Date.now(), timezone));
+      const index = quotaHistory.findIndex(entry => entry.from === from);
+      if (index >= 0) quotaHistory[index] = { from, target: weeklyTarget };
+      else quotaHistory.push({ from, target: weeklyTarget });
+    }
+  }
+  if (!['ready', 'waiting'].includes(input.workStatus ?? existing.workStatus ?? 'ready')) throw new InputError('Choose ready or waiting for this task.');
   const due = input.due ?? existing.due ?? '';
   if (due && !validDate(due)) throw new InputError('Choose a valid due date.');
   const minimumGapMinutes = Number(input.minimumGapMinutes ?? existing.minimumGapMinutes ?? (repeat.startsWith('interval_') && Number(repeat.slice(9)) < 1 ? 360 : 0));
@@ -38,6 +56,10 @@ export function taskInput(input, existing = {}) {
   return { ...existing, id: existing.id ? String(existing.id) : uid(), title, description: String(input.description ?? existing.description ?? '').slice(0, 3000),
     nextAction: typeof (input.nextAction ?? existing.nextAction) === 'string' ? (input.nextAction ?? existing.nextAction).trim().slice(0, 240) : '',
     habitPlan, habitRest,
+    weekdays: [...new Set(weekdays.map(Number))], weeklyTarget, quotaHistory,
+    projectId: String(input.projectId ?? existing.projectId ?? '').slice(0, 100),
+    workStatus: input.workStatus ?? existing.workStatus ?? 'ready',
+    waitingFor: String(input.waitingFor ?? existing.waitingFor ?? '').slice(0, 300),
     minimumGapMinutes, personIds: Array.isArray(input.personIds) ? [...new Set(input.personIds.map(String))].slice(0,50) : existing.personIds || [], socialContact: Boolean(existing.socialContact),
     category: String(input.category ?? existing.category ?? 'Personal').slice(0, 50), minutes: finite(input.minutes ?? existing.minutes, 1, 480, 15),
     energy: ['low', 'medium', 'high'].includes(input.energy ?? existing.energy) ? (input.energy ?? existing.energy) : 'medium',
@@ -49,6 +71,25 @@ export function taskInput(input, existing = {}) {
 export function validDate(date) { return /^\d{4}-\d{2}-\d{2}$/.test(String(date)) && !Number.isNaN(Date.parse(date)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) === date; }
 export function countToday(task, date) { return (task.history?.[date] || []).length; }
 export function taskStreak(task, date) {
+  if (task.repeat === 'quota') {
+    let current = 0, cursor = weekStart(date);
+    if (!done(task, date)) cursor = addDays(cursor, -7);
+    while (current < 10000 && done(task, cursor)) { current++; cursor = addDays(cursor, -7); }
+    return { current, active: done(task, date) };
+  }
+  if (task.repeat === 'weekdays') {
+    let current = 0, cursor = date, inspected = 0;
+    const earliest = Object.keys(task.history || {}).sort()[0] || date;
+    if (scheduledDay(task, cursor) && !countToday(task, cursor)) cursor = addDays(cursor, -1);
+    while (cursor >= earliest && inspected++ < 50000) {
+      if (scheduledDay(task, cursor) && !habitRestCount(task, cursor)) {
+        if (!done(task, cursor)) break;
+        current++;
+      }
+      cursor = addDays(cursor, -1);
+    }
+    return { current, active: countToday(task, date) > 0 };
+  }
   const active = countToday(task, date) > 0;
   const interval = task.repeat === 'weekly' ? 7 : task.repeat?.startsWith('interval_') ? Math.max(1, Math.round(Number(task.repeat.slice(9)))) : 1;
   const dates = Object.keys(task.history || {}).filter(d => validDate(d) && d <= date && countToday(task,d)>0).sort();
@@ -57,8 +98,14 @@ export function taskStreak(task, date) {
   for(let i=dates.length-1;i>0;i--){if(dates[i]>addDays(dates[i-1],interval))break;current++;}
   return {current, active};
 }
-export function done(task, date) { return task.repeat === 'none' ? task.completed : countToday(task, date) >= task.target; }
-export function habitRestCount(task, date) { return Math.min(task.habitRest?.[date] || 0, Math.max(0, task.target - countToday(task, date))); }
+export function done(task, date) {
+  const progress = taskProgress(task, date);
+  return task.repeat === 'none' ? task.completed : progress.count >= progress.target;
+}
+export function habitRestCount(task, date) {
+  const progress = taskProgress(task, date);
+  return Math.min(task.habitRest?.[date] || 0, Math.max(0, progress.target - progress.count));
+}
 export function nextEligibleAt(task, date) {
   if (!task.repeat.startsWith('interval_') || Number(task.repeat.slice(9)) >= 1 || !countToday(task,date) || done(task,date)) return null;
   const last = Math.max(...(task.history?.[date] || []).map(e=>Number(e.at)||0));
@@ -66,9 +113,11 @@ export function nextEligibleAt(task, date) {
 }
 export function isDue(task, date, now = Date.now()) {
   if (task.deleted || done(task, date)) return false;
-  if (task.repeat !== 'none' && countToday(task, date) + habitRestCount(task, date) >= task.target) return false;
+  if (task.workStatus === 'waiting' || !scheduledDay(task, date)) return false;
+  const progress = taskProgress(task, date);
+  if (task.repeat !== 'none' && progress.count + progress.rest >= progress.target) return false;
   if (task.due && task.due > date) return false;
-  if (task.repeat === 'none' || task.repeat === 'daily') return true;
+  if (['none', 'daily', 'weekdays', 'quota'].includes(task.repeat)) return true;
   const days = task.repeat === 'weekly' ? 7 : Number(task.repeat.slice(9));
   if (days < 1) return (nextEligibleAt(task,date) ?? 0) <= now;
   const dates = [...new Set([
@@ -80,6 +129,15 @@ export function isDue(task, date, now = Date.now()) {
 
 export function habitOpportunities(task, start, end, timezone) {
   const created = dateKey(task.created || Date.now(), timezone);
+  if (task.repeat === 'quota') {
+    const entries = [];
+    const first = [start, created, task.due || created].sort().at(-1);
+    for (let date = weekStart(first); date <= end; date = addDays(date, 7)) {
+      const progress = taskProgress(task, date);
+      entries.push({ date, completed: progress.count, rest: progress.rest, missed: addDays(date, 6) < end ? Math.max(0, progress.target - progress.count - progress.rest) : 0, weekly: true });
+    }
+    return entries;
+  }
   const days = task.repeat === 'weekly' ? 7 : task.repeat.startsWith('interval_') ? Number(task.repeat.slice(9)) : 1;
   const interval = Math.max(1, Math.ceil(days));
   const previous = [...new Set([
@@ -90,6 +148,7 @@ export function habitOpportunities(task, start, end, timezone) {
   while (next < start) next = addDays(next, interval);
   const entries = [];
   for (let date = start; date <= end; date = addDays(date, 1)) {
+    if (!scheduledDay(task, date)) continue;
     const completed = countToday(task, date), rest = habitRestCount(task, date);
     const scheduled = date >= next && date >= created && (!task.due || date >= task.due);
     if (!scheduled && !completed && !rest) continue;
@@ -100,10 +159,14 @@ export function habitOpportunities(task, start, end, timezone) {
 }
 export function chooseNext(state, date, energy = 'medium', now = Date.now()) {
   const rank = { low: 0, medium: 1, high: 2 };
-  return state.tasks.filter(t => t.lane === 'today' && isDue(t, date, now)).sort((a, b) => {
+  return state.tasks.filter(t => t.lane === 'today' && taskAvailable(state, t, date, now)).sort((a, b) => {
     const score = t => (t.due && t.due <= date ? -100 : 0) + Math.max(0, rank[t.energy] - rank[energy]) * 40 + t.minutes + (t.order / 1e14);
     return score(a) - score(b);
   })[0] || null;
+}
+export function taskAvailable(state, task, date, now = Date.now()) {
+  const project = state.projects?.find(item => item.id === task.projectId);
+  return isDue(task, date, now) && (!project || project.status === 'active');
 }
 function rememberCompletionRolls(task) {
   task.rewardRolls ||= {};
@@ -117,8 +180,9 @@ export function toggleCompletion(state, id, date, awardTask) {
   if (!task) throw new InputError('This task was not found.');
   rememberCompletionRolls(task);
   if (done(task, date)) {
-    const entry = task.repeat === 'none' ? Object.values(task.history).flat().at(-1) : task.history[date].at(-1);
-    const day = task.repeat === 'none' ? Object.keys(task.history).find(d => task.history[d].includes(entry)) : date;
+    const periodDates = Object.keys(task.history).filter(day => task.repeat !== 'quota' || day >= weekStart(date) && day <= addDays(weekStart(date), 6)).sort();
+    const entry = task.repeat === 'none' || task.repeat === 'quota' ? periodDates.flatMap(day => task.history[day]).at(-1) : task.history[date]?.at(-1);
+    const day = task.repeat === 'none' || task.repeat === 'quota' ? periodDates.find(day => task.history[day].includes(entry)) : date;
     if (entry) { task.history[day] = task.history[day].filter(e => e.id !== entry.id); state.coins -= entry.coins; state.earned = Math.max(0, state.earned - entry.coins); }
     task.completed = false;
     return -Number(entry?.coins || 0);
@@ -133,6 +197,16 @@ export function toggleCompletion(state, id, date, awardTask) {
   if (task.repeat === 'none') task.completed = true;
   state.coins += coins; state.earned += coins;
   return coins;
+}
+
+export function removeCompletion(state, task, date, completionId) {
+  const entries = task.history?.[date] || [], entry = entries.find(item => item.id === completionId);
+  if (!entry) return false;
+  task.history[date] = entries.filter(item => item.id !== completionId);
+  state.coins -= Number(entry.coins || 0);
+  state.earned = Math.max(0, state.earned - Number(entry.coins || 0));
+  task.completed = false;
+  return true;
 }
 export function undoLastCompletion(state,id,date) {
   const task=state.tasks.find(t=>t.id===id&&!t.deleted);if(!task)throw new InputError('This task was not found.');
@@ -260,7 +334,7 @@ export function finishTimer(state, now = Date.now(), early = false) {
   const baseCoins = credited ? Math.max(1, Math.round(minutes * .4)) : 0;
   const award = { baseCoins, coins: baseCoins, rewardTier: 'fixed' };
   const { coins } = award;
-  const session = { id: t.id, date: dateKey(finishedAt, state.settings.timezone), at: finishedAt, taskId: t.taskId, mode: t.mode, minutes, full, ...award };
+  const session = { id: t.id, date: dateKey(finishedAt, state.settings.timezone), at: finishedAt, taskId: t.taskId, mode: t.mode, minutes, full, ...award, ...(t.automaticFrom ? { automaticFrom: t.automaticFrom } : {}) };
   state.sessions.push(session); state.coins += coins; state.earned += coins; state.timer = null; return session;
 }
 export function metrics(state, date) {

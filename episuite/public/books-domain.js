@@ -1,4 +1,4 @@
-import { dateKey, done, InputError, isDue, toggleCompletion, uid, validDate } from './domain.js';
+import { dateKey, done, InputError, isDue, toggleCompletion, uid, validDate, removeCompletion, taskProgress } from './domain.js';
 import { syncContactCompletion } from './social-domain.js';
 
 const text = (value, limit) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
@@ -20,16 +20,23 @@ export function bookInput(input, existing = {}, today = dateKey()) {
   const totalPages = pageNumber(input.totalPages ?? existing.totalPages, 'page count', true);
   const currentPage = pageNumber(input.currentPage ?? existing.currentPage ?? 0, 'current page');
   if (totalPages !== null && currentPage > totalPages) throw new InputError('The current page exceeds the book’s page count.');
-  const coverId = input.coverId ?? existing.coverId ?? null;
+  const coverId = Object.hasOwn(input, 'coverId') ? input.coverId : existing.coverId ?? null;
   if (coverId !== null && (!Number.isSafeInteger(coverId) || coverId <= 0)) throw new InputError('Choose a valid book cover.');
   const sourceId = text(input.sourceId ?? existing.sourceId, 80);
   if (sourceId && !/^\/works\/OL\d+W$/.test(sourceId)) throw new InputError('Choose a valid book result.');
   const finishedDate = status === 'finished' ? input.finishedDate ?? existing.finishedDate ?? today : '';
   if (status === 'finished' && (!validDate(finishedDate) || finishedDate > today)) throw new InputError('Choose a finish date up to today.');
+  if (input.pinned !== undefined && typeof input.pinned !== 'boolean') throw new InputError('Choose a valid pin setting.');
+  if (existing.basePage !== undefined) pageNumber(existing.basePage, 'starting position');
+  if (existing.positionAt !== undefined && (!Number.isFinite(existing.positionAt) || existing.positionAt < 0)) throw new InputError('Invalid saved reading position.');
   return {
     id: existing.id || uid(), title, author: text(input.author ?? existing.author, 300),
     sourceId, coverId, totalPages, currentPage, status, finishedDate,
-    createdAt: existing.createdAt || Date.now(), editVersion: existing.editVersion || 0, logs: existing.logs || []
+    createdAt: existing.createdAt || Date.now(), editVersion: existing.editVersion || 0, logs: existing.logs || [],
+    pinned: input.pinned ?? existing.pinned ?? false,
+    basePage: input.currentPage !== undefined && existing.currentPage !== undefined && currentPage !== existing.currentPage ? currentPage : existing.basePage ?? existing.logs?.[0]?.from ?? currentPage,
+    positionAt: input.currentPage !== undefined && existing.currentPage !== undefined && currentPage !== existing.currentPage ? Date.now() : existing.positionAt || 0,
+    finishedByLog: status !== existing.status ? '' : existing.finishedByLog || ''
   };
 }
 
@@ -42,6 +49,9 @@ export function normalizeReading(state) {
     throw new InputError('Backup contains invalid reading task settings.');
   }
   const ids = new Set(), events = new Set();
+  reading.policy ||= 'daily';
+  reading.restoreAfterUndo ??= false;
+  if (!['daily', 'session', 'target'].includes(reading.policy) || typeof reading.restoreAfterUndo !== 'boolean') throw new InputError('Invalid reading completion policy.');
   reading.books = reading.books.map(book => {
     if (!book || typeof book.id !== 'string' || !/^[a-z0-9-]{1,100}$/i.test(book.id) || ids.has(book.id) || !Array.isArray(book.logs)) {
       throw new InputError('Backup contains an invalid book.');
@@ -57,7 +67,10 @@ export function normalizeReading(state) {
         throw new InputError('Backup contains an invalid reading log.');
       }
       events.add(log.id);
-      return { id: log.id, date: log.date, at: log.at, from: log.from, to: log.to, finished: log.finished };
+      return { id: log.id, date: log.date, at: log.at, from: log.from, to: log.to, finished: log.finished,
+        deleted: Boolean(log.deleted), taskId: typeof log.taskId === 'string' ? log.taskId : '',
+        requestPage: log.requestPage ?? log.to, requestDate: log.requestDate ?? log.date,
+        requestFinished: log.requestFinished ?? log.finished };
     });
     return normalized;
   });
@@ -65,7 +78,9 @@ export function normalizeReading(state) {
     if (!credit || !validDate(credit.date) || typeof credit.taskId !== 'string' || credit.taskId.length > 300) {
       throw new InputError('Backup contains an invalid reading task receipt.');
     }
-    return { date: credit.date, taskId: credit.taskId };
+    return { date: credit.date, taskId: credit.taskId,
+      completionIds: Array.isArray(credit.completionIds) ? credit.completionIds.filter(id => typeof id === 'string') : [],
+      suppressed: Boolean(credit.suppressed), legacy: credit.legacy ?? !Array.isArray(credit.completionIds) };
   });
   state.reading = reading;
 }
@@ -92,6 +107,11 @@ export function updateReadingTask(state, data) {
     throw new InputError('Choose an existing task.');
   }
   reading.taskId = taskId;
+  if ('policy' in data) {
+    if (!['daily', 'session', 'target'].includes(data.policy)) throw new InputError('Choose a reading completion policy.');
+    reading.policy = data.policy;
+  }
+  if ('restoreAfterUndo' in data) reading.restoreAfterUndo = data.restoreAfterUndo === true;
   reading.taskVersion++;
   return { taskId };
 }
@@ -99,9 +119,13 @@ export function updateReadingTask(state, data) {
 export function logReading(state, book, data, today, award) {
   if (typeof data.eventId !== 'string' || !/^[a-z0-9-]{1,100}$/i.test(data.eventId)) throw new InputError('Use a unique reading log ID.');
   const page = pageNumber(data.page, 'page reached'), finished = data.finished === true;
+  const date = data.date || today;
+  if (!validDate(date) || date > today) throw new InputError('Choose a reading date up to today.');
   const existing = state.reading.books.flatMap(item => item.logs.map(log => ({ bookId: item.id, log }))).find(entry => entry.log.id === data.eventId);
   if (existing) {
-    if (existing.bookId !== book.id || existing.log.to !== page || existing.log.finished !== finished) {
+    if (existing.bookId !== book.id || (existing.log.requestPage ?? existing.log.to) !== page ||
+        (existing.log.requestFinished ?? existing.log.finished) !== finished ||
+        (data.date && (existing.log.requestDate ?? existing.log.date) !== date)) {
       throw Object.assign(new InputError('This reading log ID was already used for different progress.'), { status: 409 });
     }
     return { duplicate: true, taskStatus: 'unchanged' };
@@ -109,30 +133,94 @@ export function logReading(state, book, data, today, award) {
   if (Number(data.expectedVersion) !== book.editVersion) {
     throw Object.assign(new InputError('This book changed on another device. Reopen its progress form.'), { status: 409 });
   }
-  if (book.status !== 'reading') throw new InputError('Reopen this book before logging more reading.');
-  if (page <= book.currentPage) throw new InputError('Enter a page after your saved position. Use Edit book to correct a page number.');
+  if (book.status !== 'reading' && data.from === undefined) throw new InputError('Reopen this book before logging more reading.');
+  const from = pageNumber(data.from ?? book.currentPage, 'starting page');
+  if (page <= from) throw new InputError('Enter a page after your starting position. Use Edit session to correct a reading log.');
   if (book.totalPages !== null && page > book.totalPages) throw new InputError('The page reached exceeds the book’s page count.');
-  book.logs.push({ id: data.eventId, date: today, from: book.currentPage, to: page, finished, at: Date.now() });
-  book.currentPage = page;
+  book.basePage ??= book.logs[0]?.from ?? book.currentPage;
+  book.positionAt ||= 0;
+  const { task, ambiguous } = readingTask(state, date);
+  book.logs.push({ id: data.eventId, date, from, to: page, finished, at: Date.now(),
+    taskId: task?.id || '', requestPage: page, requestDate: date, requestFinished: finished });
+  book.currentPage = Math.max(book.currentPage, page);
   if (finished || page === book.totalPages) {
     book.status = 'finished';
-    book.finishedDate = today;
+    book.finishedDate = date;
+    book.finishedByLog = data.eventId;
   }
   book.editVersion++;
-  const { task, ambiguous } = readingTask(state, today);
-  let taskStatus = ambiguous ? 'choose' : 'unlinked';
-  if (task) {
-    const credited = state.reading.credits.some(receipt => receipt.date === today && receipt.taskId === task.id);
-    if (credited || done(task, today)) taskStatus = 'already';
-    else if (!isDue(task, today)) taskStatus = 'not-due';
+  const result = task ? reconcileReadingTask(state, task.id, date, award, true) : { taskStatus: ambiguous ? 'choose' : 'unlinked' };
+  return { duplicate: false, ...result, taskTitle: task?.title || '' };
+}
+
+function reconcileReadingTask(state, taskId, date, award, newSession = false) {
+  const task = state.tasks.find(item => item.id === taskId && !item.deleted);
+  if (!task) return { taskStatus: 'unlinked' };
+  const logs = state.reading.books.flatMap(book => book.logs).filter(log => !log.deleted && log.date === date && log.taskId === taskId);
+  let receipt = state.reading.credits.find(item => item.date === date && item.taskId === taskId);
+  if (!receipt) {
+    receipt = { date, taskId, completionIds: [], suppressed: false, legacy: false };
+    state.reading.credits.push(receipt);
+  }
+  if (!Array.isArray(receipt.completionIds) || receipt.legacy) return { taskStatus: 'already', legacy: true, ...taskProgress(task, date) };
+  const entries = task.history[date] || [];
+  if (receipt.completionIds.some(id => !entries.some(entry => entry.id === id))) receipt.suppressed = true;
+  receipt.completionIds = receipt.completionIds.filter(id => entries.some(entry => entry.id === id));
+  if (newSession && state.reading.restoreAfterUndo) receipt.suppressed = false;
+  const progress = taskProgress(task, date);
+  const policy = state.reading.policy || 'daily';
+  const desired = logs.length ? policy === 'target' ? Math.max(1, progress.target - (progress.count - entries.length))
+    : policy === 'session' ? logs.length : 1 : 0;
+  const manualCount = entries.length - receipt.completionIds.length;
+  const wantedOwned = Math.max(0, desired - manualCount);
+  while (receipt.completionIds.length > wantedOwned) {
+    removeCompletion(state, task, date, receipt.completionIds.pop());
+  }
+  let added = false, status = 'already';
+  if (!receipt.suppressed && wantedOwned > receipt.completionIds.length && !done(task, date)) {
+    if (!isDue(task, date)) status = 'not-due';
     else {
-      toggleCompletion(state, task.id, today, award);
-      syncContactCompletion(state, task);
-      taskStatus = done(task, today) ? 'completed' : 'recorded';
-    }
-    if (!credited && ['completed', 'recorded', 'already'].includes(taskStatus)) {
-      state.reading.credits.push({ date: today, taskId: task.id });
+      while (receipt.completionIds.length < wantedOwned && !done(task, date)) {
+        toggleCompletion(state, taskId, date, award);
+        receipt.completionIds.push(task.history[date].at(-1).id);
+        added = true;
+      }
     }
   }
-  return { duplicate: false, taskStatus, taskTitle: task?.title || '' };
+  syncContactCompletion(state, task);
+  if (added) status = done(task, date) ? 'completed' : 'recorded';
+  if (!logs.length) status = 'removed';
+  return { taskStatus: status, ...taskProgress(task, date), manualUndo: receipt.suppressed };
+}
+
+function recalculatePosition(book) {
+  const logs = book.logs.filter(log => !log.deleted);
+  book.currentPage = Math.max(book.basePage || 0, ...logs.filter(log => log.at >= (book.positionAt || 0)).map(log => log.to));
+  if (book.finishedByLog || book.status !== 'finished') {
+    const finish = logs.filter(log => log.finished || book.totalPages !== null && log.to >= book.totalPages).sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at).at(-1);
+    book.status = finish ? 'finished' : 'reading';
+    book.finishedDate = finish?.date || '';
+    book.finishedByLog = finish?.id || '';
+  }
+}
+
+export function editReadingLog(state, book, logId, data, today, award, remove = false) {
+  if (Number(data.expectedVersion) !== book.editVersion) throw Object.assign(new InputError('This book changed. Reopen its history.'), { status: 409 });
+  const log = book.logs.find(item => item.id === logId && !item.deleted);
+  if (!log) throw Object.assign(new InputError('Reading session not found.'), { status: 404 });
+  const previousDate = log.date, taskId = log.taskId || '';
+  if (remove) log.deleted = true;
+  else {
+    const date = data.date || log.date, from = pageNumber(data.from, 'starting page'), to = pageNumber(data.page, 'page reached');
+    if (!validDate(date) || date > today || to <= from || book.totalPages !== null && to > book.totalPages) throw new InputError('Choose a valid past date and page range for this session.');
+    Object.assign(log, { date, from, to, finished: data.finished === true });
+  }
+  recalculatePosition(book);
+  book.editVersion++;
+  let result = { taskStatus: 'unlinked' };
+  if (taskId) {
+    result = reconcileReadingTask(state, taskId, previousDate, award);
+    if (!remove && previousDate !== log.date) result = reconcileReadingTask(state, taskId, log.date, award);
+  }
+  return result;
 }

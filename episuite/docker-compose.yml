@@ -10,10 +10,12 @@ services:
       EPISUITE_TIMEZONE: "${EPISUITE_TIMEZONE:-Africa/Cairo}"
       EPISUITE_OLLAMA_URL: "${EPISUITE_OLLAMA_URL:-http://host.docker.internal:11434/api/generate}"
       EPISUITE_WATCH_TOKEN: "${EPISUITE_WATCH_TOKEN:-}"
+      EPISUITE_BACKUP_DIR: "/app/backups"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - episuite-data:/app/data
+      - "${EPISUITE_BACKUP_PATH:-episuite-backups}:/app/backups"
     restart: unless-stopped
     init: true
     stop_grace_period: 20s
@@ -25,3 +27,4 @@ services:
       retries: 3
 volumes:
   episuite-data:
+  episuite-backups:

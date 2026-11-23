@@ -6,7 +6,9 @@ A single workspace for tasks, habits, time blocks, focus, ideas and optional rew
 
 Life OS includes a **Reading** section. **Add a book** searches Open Library for title, author, and cover matches. Choose your book, check the page count against your edition, and save your starting page. **Log pages** records the page you reached and shows pages read today. Reaching the saved total moves the book to **Books read**. You can also mark a log as finished, or add an older book directly to the already-read shelf with its finish date. **Edit book** corrects metadata or page numbers. **All books** opens the full paginated shelf.
 
-Reading logs automatically find a single reading task when possible. Use the **Reading task** control to select a specific task or disable automatic check-offs. Each due task receives at most one automatic check-off per local workspace day, across all books. Repeated logs and request retries preserve the completed task and its rewards. Adding a book, editing a page, and recording an older finished book save your library without creating reading-task progress. A task with several daily check-offs receives one toward its target.
+Reading logs automatically find a single reading task when possible. Use **Reading task** to select a task, disable check-offs, or choose one check-off per day (default), per session, or enough to complete the task's target. Task schedules still apply. The default respects a manual undo; optionally allow a new session to check it off again. Feedback reports partial task progress. Adding or editing book metadata does not create task progress.
+
+**Details** shows the complete paginated session history. Backfill a reading date and starting page, edit a session's date or pages, or delete an incorrect session. These corrections recalculate the book position and reconcile check-offs owned by the affected sessions, preserving manual completions. Older records without completion ownership remain protected; review those historical task check-offs manually. **Change book match / cover** in the editor lets you select another edition while preserving progress and history. Pin books to Life OS; search the full library by title or author, filter by shelf, and sort by title, author, or recent reading.
 
 Books and reading logs are stored with your workspace, synchronize across devices, and are included in JSON backups. Search needs a reachable Open Library service. **Add manually** works when a book cannot be found. Covers load from Open Library and fall back to a placeholder if unavailable.
 
@@ -18,7 +20,21 @@ Focus includes **Save where I am**, quick capture, a free short break, a generic
 
 Progress includes a weekly review and optional audio/browsing-reset experiments. Trials store only condition, outcome, time, and optional friction on this browser. They expire after 30 days when next accessed or when the workspace opens. They are excluded from server state, backups, notifications, and automation. Use **Delete trial data** to remove them immediately. The browser cannot pause audio or enforce limits in other apps. Speech-free selection is a reminder to pause spoken audio on the device.
 
-Offline captures use transactional IndexedDB records scoped to workspace ID. Multiple tabs acknowledge individual note IDs. The app reports pending captures and local-storage failures. Old local capture queues migrate when their saved workspace matches. Task and timer edits continue to require the server.
+Offline captures, reading sessions and corrections, task check-offs, and locally started focus sessions use a durable IndexedDB queue scoped to the workspace. They survive a reload and sync when the server returns, with operation receipts preventing duplicate rewards. A timer started online can also be paused, resumed, finished, or reset during an outage: commands keep their original timer identity and timestamps, and sync in order. A timer changed on another device produces a reviewable conflict. Discarding unrelated queued work preserves the device's active timer. Pending-change review supports correcting, retrying, or discarding conflicts. Task metadata and project edits require the server. The app reports pending activity and local-storage failures.
+
+## Projects, habit schedules, and recovery
+
+**Projects** keeps an outcome, status, waiting reason, and chosen next task together. Add a task directly from a project card with its project preselected; use **Make next** to choose its next task. Waiting tasks and projects stay out of suggested next actions. Task rows show waiting reasons and project membership; project and status filters help review blocked work, including recurring habits. Life OS shows a compact project overview.
+
+Habit repeat options include selected weekdays and a weekly quota. Quotas count Monday through Sunday in the workspace timezone; scheduled rest contributes to the period's target. History begins in the habit's creation week. Changing a quota updates the current week onward and preserves recorded targets for earlier weeks. Progress and streaks follow the chosen schedule.
+
+Open a task's **More actions → History** to log a check-off on a past date, inspect a selected day, move an exact entry to another day, or remove a mistake. Moving preserves its original reward; removing reverses it. Reading-owned check-offs direct you to reading session history so the two histories stay consistent. Corrections require a connection and reject stale edits.
+
+Task, project, reading, next-action, reflection, thought capture, quick-task, daily outcome, and calendar forms recover unsaved drafts on the same browser. If another device changed the record, review its latest values and explicitly accept the draft before saving. Drafts remain local to this browser and are excluded from portable backups. The library also offers **Recently read**, separate from pinned/newly added order, using the latest non-deleted reading session.
+
+Settings → Data → **Manage automatic backups** shows freshness and saved versions. Snapshots default to every 24 hours with 14 versions retained while the server runs. Create one immediately, check its SHA-256 integrity and restore format, download it, or restore it after confirmation. Restore creates a recovery copy first. Portable snapshots exclude connection credentials and live redemption keys; keep your server configuration separately.
+
+Direct Node startup writes snapshots to `data/backups` by default. Set `EPISUITE_BACKUP_DIR` to a mounted separate disk or network destination. Compose uses a separate backup volume; set `EPISUITE_BACKUP_PATH` in `.env` to a host directory on your backup disk. Configure that destination on your server to protect against loss of its primary disk. Checks validate integrity and import compatibility; periodically exercise a restore in a disposable workspace.
 
 Portable JSON exports and imports share a 64 MiB UTF-8 byte limit. A successful export can be imported within that same limit. Larger workspaces require a stopped-service copy of the data directory. Imports validate first and save an owner-readable recovery copy before replacing state.
 
@@ -92,11 +108,11 @@ tailscale serve --bg http://127.0.0.1:3210
 tailscale serve status
 ```
 
-Use the **HTTPS `.ts.net` address printed by that command** on your phone. Tailscale Serve stays private to your tailnet and provisions HTTPS; it may ask you to enable HTTPS in the tailnet. The exact hostname depends on your tailnet. See the [official Serve documentation](https://tailscale.com/docs/features/tailscale-serve). On a PC running Tailscale, use that same HTTPS address even while on the home network. You can also continue using the LAN IP for connected PC access to the same server data, but browser caches and offline queues belong to each address separately. Do not alternate addresses before queued offline captures have synced.
+Use the **HTTPS `.ts.net` address printed by that command** on your phone. Tailscale Serve stays private to your tailnet and provisions HTTPS; it may ask you to enable HTTPS in the tailnet. The exact hostname depends on your tailnet. See the [official Serve documentation](https://tailscale.com/docs/features/tailscale-serve). On a PC running Tailscale, use that same HTTPS address even while on the home network. You can also continue using the LAN IP for connected PC access to the same server data, but browser caches and offline queues belong to each address separately. Do not alternate addresses before queued offline activity has synced.
 
 On Android, choose **More → Install Episuite** or the browser's Install app menu. On iPhone/iPad, open the HTTPS address in Safari, choose **Share → Add to Home Screen**, and leave **Open as Web App** enabled if shown. More → Install Episuite also reports the connection and offline-cache status. The manifest uses standalone mode and includes PNG icons and an Apple touch icon. Browser installation UI varies by platform; see [MDN's installability guide](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable).
 
-The service worker caches all page modules and icons. When offline, the app reopens your last saved workspace; Capture queues notes and syncs them when the server returns. Shared edits and timers still need the server. In-app commitment reminders need an open app, and closed-app alarms remain the responsibility of an exported/synced calendar. Installation/offline behavior has been verified in a disposable Chrome profile and a phone-sized browser viewport, not on a physical iPhone or Android device.
+The service worker caches all page modules and icons. When offline, the app reopens your last saved workspace; Capture queues notes and syncs them when the server returns. Reading, task check-offs, and locally started focus sessions queue for sync; metadata edits and shared timer controls need the server. In-app commitment reminders need an open app, and closed-app alarms remain the responsibility of an exported/synced calendar. Installation/offline behavior has been verified in a disposable Chrome profile and a phone-sized browser viewport, not on a physical iPhone or Android device.
 
 Docker is not installed in this development environment, so the container itself has **not** been executed. The image/Compose configuration was reviewed, and the underlying Node server was tested with two independent browser origins, restart persistence, concurrent requests and stale controls.
 
@@ -132,7 +148,7 @@ Guide progress is saved on your server and included in backups. All first-run wa
 - Light/dark/system themes, reduced motion, less stimulation, timer typefaces, local image background, optional muted focus video stored in IndexedDB, name, timezone and volume preferences.
 - JSON backup/restore and legacy EpiApps/Epimix imports, including completed/deleted tasks, habit histories, category names, time blocks, historical focus totals, custom rewards and unspent reward time. Additional legacy metadata is preserved in the backup archive.
 - Calendar export, optional CalDAV PUT sync and removal of previously synced events, optional local Ollama task breakdown, and an updated Zepp watch companion.
-- Service worker caches the app shell. Last-saved data remains readable when the server is unavailable. Thought capture works offline and syncs with idempotent IDs when the server returns. Task edits and new focus sessions require the server; Episuite is not a fully standalone offline database.
+- Service worker caches the app shell. Last-saved data remains readable when the server is unavailable. Thought capture works offline and syncs with idempotent IDs when the server returns. Reading activity, task check-offs, and local focus sessions queue offline; metadata edits require the server.
 
 New JSON imports clear active timers and keep current calendar credentials. Exports exclude calendar passwords and credential-like fields inside archived legacy data. The local data file still contains credentials for optional CalDAV use; keep its directory private.
 
@@ -175,7 +191,7 @@ node --test tests/domain.test.mjs tests/server.test.mjs tests/integrations.test.
 node scripts/check.mjs
 ```
 
-All 51 tests passed after the home-server update. The tests use temporary directories and local HTTP mock services. They never read or modify your original app data. The inventory generator is `node scripts/audit.mjs`.
+Run `npm run verify` for source checks, the full unit/integration suite, and browser walkthroughs. The tests use temporary directories and local HTTP mock services. They never read or modify your original app data. The inventory generator is `node scripts/audit.mjs`.
 
 Read [AUDIT.md](AUDIT.md) for source comparisons and feature decisions, and [USER-JUDGE.md](USER-JUDGE.md) for the simulated evaluation and revisions. The user judge score is a usability assessment by the building agent, not independent user research or a clinical efficacy result.
 

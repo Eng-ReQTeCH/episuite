@@ -12,7 +12,7 @@ function cover(book, size = 'M') {
 }
 
 function bookCard(book, today) {
-  const pagesToday = book.logs.filter(log => log.date === today).reduce((sum, log) => sum + log.to - log.from, 0);
+  const pagesToday = book.logs.filter(log => !log.deleted && log.date === today).reduce((sum, log) => sum + log.to - log.from, 0);
   return `<article class="book-card" data-book="${e(book.id)}">
     ${cover(book)}
     <div class="book-card-content">
@@ -31,28 +31,30 @@ function bookCard(book, today) {
 
 export function booksPanel(state, today) {
   const books = state.reading?.books || [];
-  const current = books.filter(book => book.status === 'reading');
+  const current = books.filter(book => book.status === 'reading').sort((a,b)=>Number(b.pinned)-Number(a.pinned) || Math.max(0,...b.logs.filter(log=>!log.deleted).map(log=>log.at))-Math.max(0,...a.logs.filter(log=>!log.deleted).map(log=>log.at)));
   const finished = books.filter(book => book.status === 'finished').sort((a, b) => b.finishedDate.localeCompare(a.finishedDate));
   const { task, ambiguous } = readingTask(state, today);
-  const linkText = task ? 'Daily check-off · ' + task.title : ambiguous ? 'Choose a reading task' : 'Reading task';
+  const policyLabel = { daily: 'Daily check-off', session: 'Session check-off', target: 'Complete target' }[state.reading?.policy || 'daily'];
+  const linkText = task ? policyLabel + ' · ' + task.title : ambiguous ? 'Choose a reading task' : 'Reading task';
   return `<section class="books-panel" aria-labelledby="books-title">
     <div class="board-section-heading">
       <div><h2 id="books-title">Reading.</h2>${books.length ? `<p>${current.length} in progress · ${finished.length} read</p>` : ''}</div>
-      <div class="row wrap">${button('Add a book', 'book-add')}${books.length > 2 ? button('All books', 'book-library', '0', 'text') : ''}</div>
+      <div class="row wrap">${button('Add a book', 'book-add')}${books.length ? button('All books', 'book-library', '0', 'text') : ''}</div>
     </div>
     ${current.length ? `<div class="book-grid">${current.slice(0, 2).map(book => bookCard(book, today)).join('')}</div>`
       : `<p class="small book-empty">${finished.length ? 'Choose your next book when you’re ready.' : 'Keep your place in a book and build a shelf of what you’ve read.'}</p>`}
-    ${current.length > 2 ? button(`See all ${current.length} current books`, 'book-library', '0', 'text') : ''}
+    ${current.length > 2 ? button(`See all ${current.length} current books`, 'book-library-reading', '0', 'text') : ''}
     ${finished.length ? `<details class="books-finished"><summary>Books read · ${finished.length}</summary>
       <div class="book-grid">${finished.slice(0, 4).map(book => bookCard(book, today)).join('')}</div>
-      ${finished.length > 4 ? button('See full history', 'book-library', '0', 'text') : ''}
+      ${finished.length > 4 ? button('See full history', 'book-library-finished', '0', 'text') : ''}
     </details>` : ''}
     <div class="book-task-link">${button(e(linkText), 'book-task-settings', '', 'text')}</div>
   </section>`;
 }
 
 export function bookTools({ getState, request, render, showDialog, closeDialog, field, select, today, toast }) {
-  let matches = [], query = '', selected = null, removal = null;
+  let matches = [], query = '', removal = null, logRemoval = null, coverTarget = null;
+  let libraryQuery = '', libraryShelf = 'all', librarySort = 'recent';
   const find = id => getState().reading.books.find(book => book.id === id);
   document.addEventListener('error', event => {
     const image = event.target;
@@ -78,14 +80,14 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
     <div class="row wrap">${button('Add manually', 'book-manual', '', 'text')}<a class="small" href="https://openlibrary.org" target="_blank" rel="noopener noreferrer">Search and covers from Open Library</a></div>`);
   }
 
-  function bookForm(book, editing = false) {
-    selected = book;
+  function bookForm(book, editing = false, skipDraft = false) {
     const createId = editing ? '' : uid();
     showDialog(editing ? 'Edit book' : 'Add to your books', `
       ${cover(book)}
       <input type="hidden" name="id" value="${e(editing ? book.id : '')}">
       <input type="hidden" name="expectedVersion" value="${editing ? book.editVersion : 0}">
       <input type="hidden" name="eventId" value="${createId}">
+      <input type="hidden" name="coverId" value="${book.coverId ?? ''}"><input type="hidden" name="sourceId" value="${e(book.sourceId || '')}">
       ${field('Title', 'title', book.title, 'text', 'required maxlength="300"')}
       ${field('Author (optional)', 'author', book.author, 'text', 'maxlength="300"')}
       <div class="form-grid">
@@ -95,40 +97,104 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
       ${book.sourceId ? '<p class="small">Check the page count against your edition.</p>' : ''}
       ${select('Shelf', 'status', [['reading', 'Currently reading'], ['finished', 'Already read']], book.status || 'reading')}
       ${field('Finish date (for books already read)', 'finishedDate', book.finishedDate || today(), 'date', `max="${today()}"`)}
+      ${editing ? button('Change cover / book match', 'book-change-cover', book.id) : ''}<label><input type="checkbox" name="pinned" ${book.pinned ? 'checked' : ''}> Pin on Life OS</label>
       ${editing ? button('Remove book', 'book-remove', book.id, 'text danger') : ''}`,
       'book-save', editing ? 'Save book' : 'Add book');
+    if (skipDraft) document.querySelector('[data-form="book-save"]').dataset.skipDraft = 'true';
   }
 
-  function details(book) {
-    const logs = book.logs.slice(-12).reverse();
+  function details(book, page = 0) {
+    const logs = book.logs.filter(log => !log.deleted).sort((a,b)=>b.date.localeCompare(a.date)||b.at-a.at);
+    const pages = Math.max(1,Math.ceil(logs.length/8));
+    page = Math.max(0,Math.min(page,pages-1));
     showDialog(book.title, `${cover(book)}
-      <p>${e(book.author)}</p>
-      <p>Page ${book.currentPage}${book.totalPages ? ' of ' + book.totalPages : ''}${book.status === 'finished' ? ' · Finished ' + e(book.finishedDate) : ''}</p>
-      <div class="row wrap">${book.status === 'reading' ? button('Log pages', 'book-log', book.id, 'primary') : ''}${button('Edit book', 'book-edit', book.id)}</div>
-      <h3 class="book-log-heading">Recent reading</h3>
-      ${logs.length ? `<ul class="book-log-history">${logs.map(log => `<li><time>${log.date}</time><span>Pages ${log.from}–${log.to} · +${log.to - log.from}</span></li>`).join('')}</ul>`
-        : '<p class="small">Your reading logs will appear here.</p>'}
-      ${book.logs.length > 12 ? `<p class="small">${book.logs.length} logs saved in total.</p>` : ''}`);
+      <p>${e(book.author)}</p><p>Page ${book.currentPage}${book.totalPages ? ' of '+book.totalPages : ''}</p>
+      <div class="row wrap">${button('Log pages','book-log',book.id,'primary')}${button('Edit book','book-edit',book.id)}${button(book.pinned?'Unpin from Life OS':'Pin to Life OS','book-pin',book.id,'text')}</div>
+      <h3 class="book-log-heading">Reading history · ${logs.length} sessions</h3>
+      <ul class="book-log-history">${logs.slice(page*8,page*8+8).map(log=>`<li><div><time>${log.date}</time><p>Pages ${log.from}–${log.to} · +${log.to-log.from}</p></div><div class="row wrap">${button('Edit session','book-log-edit',book.id+':'+log.id,'text')}${button('Delete session','book-log-delete',book.id+':'+log.id,'text')}</div></li>`).join('')}</ul>
+      ${pages>1 ? `<div class="row spread">${page?button('Previous sessions','book-history',book.id+':'+(page-1)):''}<span>${page+1}/${pages}</span>${page<pages-1?button('Older sessions','book-history',book.id+':'+(page+1)):''}</div>`:''}`);
   }
 
   function library(page = 0) {
-    const books = [...getState().reading.books].sort((a, b) => Number(a.status === 'finished') - Number(b.status === 'finished') || b.finishedDate.localeCompare(a.finishedDate) || b.createdAt - a.createdAt);
-    const pages = Math.max(1, Math.ceil(books.length / 8));
-    page = Math.min(Math.max(page, 0), pages - 1);
-    showDialog('Your books', `<div class="book-grid book-library">${books.slice(page * 8, page * 8 + 8).map(book => bookCard(book, today())).join('') || '<p>No books added yet.</p>'}</div>
-      ${pages > 1 ? `<div class="row spread">${page ? button('Previous', 'book-library', String(page - 1)) : '<span></span>'}<span>${page + 1} / ${pages}</span>${page < pages - 1 ? button('Next', 'book-library', String(page + 1)) : ''}</div>` : ''}`);
+    const all = getState().reading.books;
+    const books = all.filter(book=>(libraryShelf==='all'||book.status===libraryShelf)&&[book.title,book.author].join(' ').toLowerCase().includes(libraryQuery.toLowerCase()));
+    const lastRead = book => Math.max(0, ...book.logs.filter(log=>!log.deleted).map(log=>Date.parse(log.date+'T12:00:00Z')));
+    const lastLogged = book => Math.max(0,...book.logs.filter(log=>!log.deleted).map(log=>log.at));
+    books.sort((a,b)=>librarySort==='title'?a.title.localeCompare(b.title):librarySort==='author'?a.author.localeCompare(b.author):librarySort==='read'?lastRead(b)-lastRead(a)||lastLogged(b)-lastLogged(a)||b.createdAt-a.createdAt:Number(b.pinned)-Number(a.pinned)||b.createdAt-a.createdAt);
+    const pages=Math.max(1,Math.ceil(books.length/8));
+    page=Math.max(0,Math.min(page,pages-1));
+    showDialog('Your books',`<div class="book-library-controls"><label for="book-library-query">Find a book</label><input type="search" id="book-library-query" value="${e(libraryQuery)}" placeholder="Title or author">
+      ${select('Shelf','libraryShelf',[['all','All books'],['reading','Currently reading'],['finished','Finished']],libraryShelf)}
+      ${select('Sort','librarySort',[['recent','Pinned and newest'],['read','Recently read'],['title','Title'],['author','Author']],librarySort)}</div>
+      <p class="small">${books.length} matching books</p><div class="book-grid book-library">${books.slice(page*8,page*8+8).map(book=>bookCard(book,today())).join('')||'<p>No books match this view.</p>'}</div>
+      ${pages>1?`<div class="row spread">${page?button('Previous','book-library',String(page-1)):''}<span>${page+1}/${pages}</span>${page<pages-1?button('Next','book-library',String(page+1)):''}</div>`:''}`);
   }
+
+  document.addEventListener('input',event=>{
+    if(event.target.id!=='book-library-query')return;
+    const position=event.target.selectionStart;
+    libraryQuery=event.target.value;library();
+    const search=document.querySelector('#book-library-query');search.focus();search.setSelectionRange(position,position);
+  });
+  document.addEventListener('change',event=>{
+    if(event.target.name==='libraryShelf'){libraryShelf=event.target.value;library();}
+    if(event.target.name==='librarySort'){librarySort=event.target.value;library();}
+  });
 
   async function handle(name, id) {
     switch (name) {
-      case 'book-add': query = ''; matches = []; searchDialog(); return true;
-      case 'book-choose':
-        if (matches[Number(id)]) bookForm(matches[Number(id)]);
+      case 'book-add': coverTarget = null; query = ''; matches = []; searchDialog(); return true;
+      case 'book-choose': {
+        const match = matches[Number(id)];
+        if (match && coverTarget) {
+          const existing = find(coverTarget.id);
+          bookForm({ ...existing, ...coverTarget.values, coverId: match.coverId, sourceId: match.sourceId, title: match.title, author: match.author, editVersion: Number(coverTarget.values.expectedVersion) }, true, true);
+          coverTarget = null;
+        } else if (match) bookForm(match);
         return true;
+      }
+      case 'book-change-cover': {
+        const form = document.querySelector('[data-form="book-save"]');
+        coverTarget = { id, values: Object.fromEntries(new FormData(form)) };
+        coverTarget.values.pinned = form.elements.pinned.checked;
+        query = form.elements.title.value;
+        searchDialog(); return true;
+      }
       case 'book-manual': bookForm({ title: query, author: '', totalPages: null, coverId: null, sourceId: '' }); return true;
       case 'book-edit': if (find(id)) bookForm(find(id), true); return true;
       case 'book-details': if (find(id)) details(find(id)); return true;
+      case 'book-pin': {
+        const book = find(id);
+        await request('/api/books/' + id, { pinned: !book.pinned, expectedVersion: book.editVersion }, 'PATCH');
+        render(); details(find(id)); return true;
+      }
       case 'book-library': library(Number(id) || 0); return true;
+      case 'book-library-reading': libraryShelf = 'reading'; library(); return true;
+      case 'book-library-finished': libraryShelf = 'finished'; library(); return true;
+      case 'book-history': { const [bookId, page] = id.split(':'); if (find(bookId)) details(find(bookId), Number(page)); return true; }
+      case 'book-log-edit': case 'book-log-delete': {
+        const [bookId, logId] = id.split(':'), book = find(bookId), log = book?.logs.find(item => item.id === logId && !item.deleted);
+        if (!log) return true;
+        if (name === 'book-log-delete') {
+          logRemoval = { bookId, logId, expectedVersion: book.editVersion, operationId: uid() };
+          showDialog('Delete reading session?', `<p>${e(book.title)} · ${log.date} · pages ${log.from}–${log.to}</p><p>Task check-offs created by this session will be reconciled with your other reading.</p>${button('Delete session','book-log-confirm-delete',log.id,'danger')}`);
+          return true;
+        }
+        showDialog('Edit reading session', `<input type="hidden" name="id" value="${e(bookId)}"><input type="hidden" name="logId" value="${e(logId)}">
+          <input type="hidden" name="expectedVersion" value="${book.editVersion}"><input type="hidden" name="operationId" value="${uid()}">
+          ${field('Reading date','date',log.date,'date',`required max="${today()}"`)}
+          ${field('Starting page','from',log.from,'number','min="0" required')}
+          ${field('Page reached','page',log.to,'number',`min="1" max="${book.totalPages || 1000000}" required`)}
+          <label><input type="checkbox" name="finished" ${log.finished?'checked':''}> Finished the book in this session</label>`, 'book-log-edit','Save session');
+        return true;
+      }
+      case 'book-log-confirm-delete': {
+        if (!logRemoval || logRemoval.logId !== id) return true;
+        const response = await request('/api/books/' + logRemoval.bookId + '/logs/' + logRemoval.logId, logRemoval, 'DELETE');
+        logRemoval = null; closeDialog(); render();
+        toast(response.queued ? 'Deletion saved on this device for sync.' : 'Reading session deleted and task check-offs reconciled.');
+        return true;
+      }
       case 'book-log': {
         const book = find(id);
         if (!book) return true;
@@ -136,9 +202,11 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
           <input type="hidden" name="id" value="${e(book.id)}">
           <input type="hidden" name="expectedVersion" value="${book.editVersion}">
           <input type="hidden" name="eventId" value="${uid()}">
-          ${field('Page reached', 'page', '', 'number', `min="${book.currentPage + 1}" max="${book.totalPages || 1000000}" step="1" required`)}
+          ${field('Reading date','date',today(),'date',`required max="${today()}"`)}
+          ${field('Starting page','from',book.currentPage,'number','min="0" step="1" required')}
+          ${field('Page reached', 'page', '', 'number', `min="1" max="${book.totalPages || 1000000}" step="1" required`)}
           <label class="book-finished-toggle"><input type="checkbox" name="finished"> I finished this book</label>
-          <p class="small">One due reading task gets a check-off when you log pages today.</p>`,
+          <p class="small">The reading task uses this session’s date and your selected check-off policy.</p>`,
           'book-log', 'Save reading');
         return true;
       }
@@ -148,7 +216,9 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
         showDialog('Reading task', `
           <input type="hidden" name="expectedVersion" value="${reading.taskVersion}">
           ${select('Check off when I read', 'taskId', [['auto', 'Automatically find a reading task'], ['none', 'No task check-off'], ...tasks.map(task => [task.id, task.title])], reading.taskId)}
-          <p class="small">Reading logs give at most one automatic check-off per task each day. If several tasks match, choose one here.</p>`,
+          ${select('Completion policy','policy',[['daily','One check-off per day'],['session','One check-off per reading session'],['target','Complete the task’s current target']],reading.policy || 'daily')}
+          <label><input type="checkbox" name="restoreAfterUndo" ${reading.restoreAfterUndo?'checked':''}> Let a new session check off reading again after I manually undo it</label>
+          <p class="small">Session check-offs respect the task’s repeat schedule and minimum gap. Manual task completions are preserved when sessions are corrected.</p>`,
           'book-task', 'Save reading task');
         return true;
       }
@@ -179,23 +249,27 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
       return true;
     }
     if (type === 'book-save') {
-      const payload = { ...data, coverId: selected?.coverId ?? null, sourceId: selected?.sourceId || '' };
+      const payload = { ...data, coverId: data.coverId ? Number(data.coverId) : null, sourceId: data.sourceId || '', pinned: form.elements.pinned.checked };
       if (data.status === 'finished' && Number(data.currentPage) === 0 && data.totalPages) payload.currentPage = Number(data.totalPages);
       await request(data.id ? '/api/books/' + data.id : '/api/books', payload, data.id ? 'PATCH' : 'POST');
       closeDialog(); render(); toast(data.id ? 'Book saved.' : 'Book added to your shelf.');
       return true;
     }
-    if (type === 'book-log') {
-      const response = await request('/api/books/' + data.id + '/log', { ...data, finished: form.elements.finished.checked });
+    if (type === 'book-log' || type === 'book-log-edit') {
+      const endpoint = '/api/books/' + data.id + (type === 'book-log' ? '/log' : '/logs/' + data.logId);
+      const response = await request(endpoint, { ...data, finished: form.elements.finished.checked }, type === 'book-log' ? 'POST' : 'PATCH');
       closeDialog(); render();
-      const status = response.result.taskStatus;
-      toast(status === 'completed' || status === 'recorded' ? 'Reading saved and your reading task checked off.'
+      const status = response.result.taskStatus, progress = response.result;
+      toast(response.queued ? 'Reading saved on this device. It will sync when connected.'
+        : progress.manualUndo ? 'Reading saved. Your manual task undo is still in effect.'
+        : status === 'recorded' ? `Reading saved · task progress ${progress.count}/${progress.target}.`
+        : status === 'completed' ? 'Reading saved and your reading task completed.'
         : status === 'choose' ? 'Reading saved. Choose your reading task in the book section.'
           : 'Reading saved.');
       return true;
     }
     if (type === 'book-task') {
-      await request('/api/reading/task', data);
+      await request('/api/reading/task', { ...data, restoreAfterUndo: form.elements.restoreAfterUndo.checked });
       closeDialog(); render(); toast('Reading task saved.');
       return true;
     }
