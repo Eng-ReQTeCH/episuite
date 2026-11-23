@@ -3,7 +3,7 @@ services:
   episuite:
     build: .
     ports:
-      - "${EPISUITE_BIND_ADDRESS:-127.0.0.1}:${EPISUITE_PORT:-3210}:3210"
+      - "${EPISUITE_BIND_ADDRESS:-0.0.0.0}:${EPISUITE_PORT:-3210}:3210"
     environment:
       HOST: "0.0.0.0"
       PORT: "3210"
@@ -25,6 +25,13 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+    networks:
+      - shared
+      - default
 volumes:
   episuite-data:
   episuite-backups:
+networks:
+  shared:
+    external: true
+    name: cloudflaretun

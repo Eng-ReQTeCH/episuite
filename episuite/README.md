@@ -89,7 +89,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Compose publishes to loopback by default. Use Tailscale Serve or an authenticated HTTPS reverse proxy on the host and open its HTTPS address on every device. For intentional direct LAN access, set EPISUITE_BIND_ADDRESS to the host's LAN IP in .env. Each reachable client has owner access. Reverse-proxy the whole app at its own hostname/root, including /api/, and preserve the Host header.
+Compose matches Elysium: it publishes on all host interfaces by default and joins the existing external `cloudflaretun` network as well as the default network. The Cloudflare tunnel can reach `http://episuite:3210`. Set EPISUITE_BIND_ADDRESS=127.0.0.1 in .env for host-loopback-only publishing, or set a specific host LAN IP. Use the same HTTPS address on every device for installation and offline support. Each reachable client has owner access. Reverse-proxy the whole app at its own hostname/root, including /api/, and preserve the Host header.
 
 For the Zepp day feed, optionally set EPISUITE_WATCH_TOKEN on the server and the same watch token in Zepp settings. The token grants read access to /api/v1/day. Keep this feed behind your device/network access boundary.
 
@@ -182,7 +182,7 @@ The server checks every 30 seconds for rare task payout alerts, calendar reminde
 
 **Zepp watch:** the `watch/` directory contains the original companion with an updated display that uses Episuite's real block start/end timestamps and refreshes each minute. Build it with the existing Zepp workflow and device-specific assets from the original project. Point its server URL at a reachable Episuite address. `/api/v1/day?date=YYYY-MM-DD` supplies the day, blocks, task statuses and wake anchor. The API is tested; no physical watch or Zepp simulator was available.
 
-Direct Node startup and the published Compose port bind to loopback by default. Set HOST or EPISUITE_BIND_ADDRESS explicitly for intended LAN access. This is a personal, single-owner app.
+Direct Node startup binds to loopback by default. Compose publishes on all host interfaces for Elysium; override EPISUITE_BIND_ADDRESS in .env if needed. This is a personal, single-owner app.
 
 ## Verify
 
