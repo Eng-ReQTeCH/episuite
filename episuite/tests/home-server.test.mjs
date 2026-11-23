@@ -61,7 +61,7 @@ test('shared timers persist through restart and stale controls cannot end a newe
 }));
 test('Docker package exposes the shared server, excludes local data and preserves its volume',async()=>{
   const compose=await readFile(new URL('../docker-compose.yml',import.meta.url),'utf8'),image=await readFile(new URL('../Dockerfile',import.meta.url),'utf8'),ignore=await readFile(new URL('../.dockerignore',import.meta.url),'utf8');
-  assert.match(compose,/name: episuite/);assert.match(compose,/EPISUITE_BIND_ADDRESS:-0\.0\.0\.0/);assert.match(compose,/episuite-data:\/app\/data/);assert.match(compose,/healthcheck:/);assert.match(compose,/restart: unless-stopped/);assert.match(compose,/init: true/);
+  assert.match(compose,/name: episuite/);assert.match(compose,/EPISUITE_BIND_ADDRESS:-127\.0\.0\.1/);assert.match(compose,/episuite-data:\/app\/data/);assert.match(compose,/healthcheck:/);assert.match(compose,/restart: unless-stopped/);assert.match(compose,/init: true/);
   assert.match(image,/USER node/);assert.match(image,/COPY public/);assert.match(ignore,/^data$/m);assert.match(ignore,/^\.env$/m);
 });
 test('expired focus creates one shared automatic break; concurrent clients cannot finish that new break',async()=>{

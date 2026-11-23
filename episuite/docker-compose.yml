@@ -3,12 +3,13 @@ services:
   episuite:
     build: .
     ports:
-      - "${EPISUITE_BIND_ADDRESS:-0.0.0.0}:${EPISUITE_PORT:-3210}:3210"
+      - "${EPISUITE_BIND_ADDRESS:-127.0.0.1}:${EPISUITE_PORT:-3210}:3210"
     environment:
       HOST: "0.0.0.0"
       PORT: "3210"
       EPISUITE_TIMEZONE: "${EPISUITE_TIMEZONE:-Africa/Cairo}"
       EPISUITE_OLLAMA_URL: "${EPISUITE_OLLAMA_URL:-http://host.docker.internal:11434/api/generate}"
+      EPISUITE_WATCH_TOKEN: "${EPISUITE_WATCH_TOKEN:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

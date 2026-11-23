@@ -233,3 +233,69 @@ body.dark .heat-cell.heat-1,body.dark .mini-cell.heat-1,body.dark .graph-accent-
 .calendar-cell{background:var(--surface)}.calendar-cell.is-today{background:color-mix(in srgb,var(--accent) 9%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 40%,var(--line))}.calendar-cell.outside-month{background:color-mix(in srgb,var(--surface) 55%,var(--bg))}.calendar-event{background:color-mix(in srgb,var(--event-color) 18%,var(--surface));border-left:4px solid var(--event-color)}.calendar-event:hover{background:color-mix(in srgb,var(--event-color) 27%,var(--surface))}.calendar-weekday{background:var(--surface)}body.dark .calendar-cell{background:color-mix(in srgb,var(--surface) 85%,white 4%)}body.dark .calendar-event{background:color-mix(in srgb,var(--event-color) 25%,var(--surface))}
 /* Workspace-local past/today markers; overlays never intercept calendar controls. */
 .calendar-cell{position:relative}.past-days-gray .calendar-cell.is-past{background:color-mix(in srgb,var(--line) 42%,var(--bg));filter:grayscale(1)}.past-days-gray .calendar-cell.is-past>.calendar-event{opacity:.72}.past-days-cross .calendar-cell.is-past::after{content:'';position:absolute;inset:3px;pointer-events:none;z-index:1;background:linear-gradient(to top right,transparent calc(50% - 1px),var(--muted) 50%,transparent calc(50% + 1px)),linear-gradient(to bottom right,transparent calc(50% - 1px),var(--muted) 50%,transparent calc(50% + 1px));opacity:.22}.calendar-cell.is-today{box-shadow:inset 0 0 0 2px var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--surface))}.calendar-today-label{display:inline-block;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:600;border-radius:4px;padding:2px 6px;margin:0 0 5px 4px}.calendar-cell.is-today .calendar-date{font-weight:750;color:var(--accent)}body.dark .calendar-cell.is-today{background:color-mix(in srgb,var(--accent) 15%,var(--surface))}body.dark .past-days-gray .calendar-cell.is-past{background:color-mix(in srgb,var(--line) 30%,var(--bg))}@media(max-width:700px){.calm-month .calendar-today-label{display:block;width:max-content;margin:0 auto 3px;font-size:9px;padding:1px 3px}.calm-month .is-today .calendar-date{min-height:34px}}
+/* Planning and focus tools share the existing panels and spacing. */
+.books-panel { margin-block: 24px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: var(--surface); }
+.books-panel .board-section-heading { gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.book-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.book-card { display: flex; gap: 14px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; align-items: flex-start; }
+.book-cover { display: grid; flex: 0 0 64px; width: 64px; height: 96px; place-items: center; overflow: hidden; border-radius: 3px 6px 6px 3px; background: var(--warm); color: var(--muted); }
+.book-cover img { width: 100%; height: 100%; object-fit: contain; }
+.book-cover-placeholder { font: 26px Georgia, serif; }
+.book-card-content { flex: 1; min-width: 0; }
+.book-card-content h3 { line-height: 1.4; font-size: 15px; margin-bottom: 4px; overflow-wrap: anywhere; }
+.book-card-content .task-title { text-align: left; font-size: inherit; }
+.book-card-content .row { gap: 5px; margin-top: 8px; }
+.book-card-content progress { width: 100%; height: 6px; accent-color: var(--accent); display: block; margin-block: 8px; }
+.book-position { margin-top: 6px; }
+.book-today { color: var(--accent); }
+.book-empty { padding-block: 6px; }
+.book-task-link { margin-top: 10px; }
+.book-task-link .btn { white-space: normal; text-align: left; justify-content: flex-start; }
+.books-finished { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.books-finished summary { cursor: pointer; padding-block: 8px; color: var(--muted); }
+.books-finished .book-grid { margin-top: 10px; }
+.book-search-form { margin-block: 12px; }
+.book-search-form label { display: block; margin-bottom: 6px; }
+.book-search-form input { flex: 1; min-width: 0; }
+.book-search-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-block: 16px; }
+.book-result { display: flex; gap: 12px; text-align: left; align-items: flex-start; border: 1px solid var(--line); padding: 12px; border-radius: 8px; }
+.book-result:hover { background: var(--soft); }
+.book-result > span:last-child { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.book-result strong { line-height: 1.4; }
+.book-result small, .book-result > span:last-child > span { color: var(--muted); font-size: 12px; }
+#dialog [data-form=book-save] > .book-cover { margin-bottom: 16px; }
+.book-finished-toggle { display: flex; gap: 10px; align-items: center; margin-block: 12px; }
+.book-finished-toggle input { width: auto; }
+.book-log-heading { margin-top: 20px; }
+.book-log-history { list-style: none; padding: 0; }
+.book-log-history li { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: space-between; padding-block: 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.book-library { margin-block: 16px; }
+@media (max-width: 700px) {
+  .book-grid, .book-search-results { grid-template-columns: minmax(0, 1fr); }
+  .books-panel { padding: 16px; }
+  .book-card { padding: 10px; }
+  .book-card-content .btn { white-space: normal; }
+}
+.productivity-panel { margin-block: 1rem; overflow-wrap: anywhere; }
+.productivity-panel h2, .productivity-panel h3 { margin-block: 0 .75rem; }
+.productivity-panel dd { margin: .25rem 0 1rem; }
+.productivity-panel dt { font-weight: 600; }
+.productivity-panel fieldset, #habit-plan { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; margin-block: 1rem; min-width: 0; }
+.productivity-scroll { overflow-x: auto; }
+.productivity-table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+.productivity-table caption { text-align: left; margin-bottom: .75rem; }
+.productivity-table th, .productivity-table td { padding: .6rem; text-align: left; border-bottom: 1px solid var(--line); }
+.habit-actions { margin-top: .5rem; }
+.habit-actions .row { gap: .25rem; }
+.habit-actions p { margin-block: .25rem; }
+@media (max-width: 700px) {
+  .productivity-panel .row { align-items: flex-start; gap: .5rem; }
+  .habit-actions .btn { white-space: normal; text-align: left; }
+}
+@media (max-width: 600px) {
+  .timer-panel { display: flex; flex-direction: column; align-items: stretch; text-align: center; }
+  .timer-panel > .row { justify-content: center; flex-wrap: wrap; }
+  .timer-panel .timer-time { width: 100%; }
+  .timer-panel .small { max-width: none; width: 100%; }
+  .timer-panel > .btn { align-self: center; }
+}

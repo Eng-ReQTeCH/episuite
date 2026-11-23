@@ -2,6 +2,7 @@ import {boardPicker,graphSources,graphCounts} from './life-board.js';
 import {activity,heatmap} from './life.js';
 export function lifeTools({getState,request,render,showDialog,closeDialog,field,btn,esc,today,timeText,remaining,taskById,action}){
  let videoPip=null,pipCanvas=null;
+ let pipControls = Promise.resolve();
  let floating=null,signature='',view={editing:false,boardPage:0};
  const saveBoard=async graphs=>{await request('/api/life/board',{graphs,expectedBoardVersion:getState().life.boardVersion});render();};
  function update(){
@@ -25,7 +26,29 @@ export function lifeTools({getState,request,render,showDialog,closeDialog,field,
    if(document.pictureInPictureElement===videoPip&&videoPip)return true;
    floating?.close();pipCanvas=document.createElement('canvas');pipCanvas.width=480;pipCanvas.height=240;videoPip=document.createElement('video');videoPip.muted=true;videoPip.playsInline=true;videoPip.srcObject=pipCanvas.captureStream(5);videoPip.style.cssText='position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';document.body.append(videoPip);update();
    const cleanup=()=>{videoPip?.srcObject?.getTracks().forEach(t=>t.stop());videoPip?.remove();videoPip=null;pipCanvas=null;};
-   try{await videoPip.play();await videoPip.requestPictureInPicture();videoPip.addEventListener('leavepictureinpicture',cleanup,{once:true});videoPip.addEventListener('pause',()=>{if(videoPip&&document.pictureInPictureElement===videoPip&&getState().timer?.status==='running')action('pause').catch(()=>{});});videoPip.addEventListener('play',()=>{if(videoPip&&document.pictureInPictureElement===videoPip&&getState().timer?.status==='paused')action('resume').catch(()=>{});});return true;}catch(error){cleanup();throw Error('Your browser could not open video PiP. Try Interactive PiP, or desktop Chrome/Edge over HTTPS or localhost.');}
+   try {
+    await videoPip.play();
+    await videoPip.requestPictureInPicture();
+    videoPip.addEventListener('leavepictureinpicture', cleanup, { once: true });
+    const control = status => {
+      const video = videoPip, timerId = getState().timer?.id;
+      if (!video || !timerId || document.pictureInPictureElement !== video) return;
+      pipControls = pipControls.then(async () => {
+        // Let PiP exit events settle before treating a media pause as a timer command.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const timer = getState().timer;
+        if (videoPip !== video || document.pictureInPictureElement !== video || timer?.id !== timerId || timer.status === status) return;
+        await request(status === 'paused' ? '/api/timer/pause' : '/api/timer/resume', { timerId });
+        render();
+      }).catch(() => showDialog('Timer control could not sync', '<p>Return to the focus screen to check your saved session and retry the control.</p>'));
+    };
+    videoPip.addEventListener('pause', () => control('paused'));
+    videoPip.addEventListener('play', () => control('running'));
+    return true;
+   } catch {
+    cleanup();
+    throw Error('Your browser could not open video PiP. Try Interactive PiP, or desktop Chrome/Edge over HTTPS or localhost.');
+   }
   }
   return handle('document-pip');
  }

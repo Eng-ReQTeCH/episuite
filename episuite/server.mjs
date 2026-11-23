@@ -9,7 +9,15 @@ import {coinAward} from './random-rewards.mjs';
 import {normalizeScreenTime, rewardInput, issueScreenTime, redeemScreenTime, preserveScreenTime} from './screentime.mjs';
 import {notificationDefaults, notificationConfig, publicNotifications, enqueueNotification, sendNotification} from './notifications.mjs';
 import {dueReminders} from './public/domain.js';
-import { readFile, writeFile, mkdir, rename, copyFile } from 'node:fs/promises';
+import { readFile, mkdir, copyFile, chmod } from 'node:fs/promises';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { backupMaxBytes, readJson, writeWorkspace } from './workspace-storage.mjs';
+import { advanceExpiredTimer } from './timer-service.mjs';
+import { assertApiMethod } from './api-methods.mjs';
+import { createBookSearch } from './book-search.mjs';
+import { bookInput, normalizeReading, logReading, updateReadingTask } from './public/books-domain.js';
+import { normalizeProductivity, reviewInput, setPriority, dayPriority, weekStart } from './public/productivity.js';
+import { countToday, isDue, habitRestCount, addDays } from './public/domain.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {engagementInput,feelingInput} from './public/engagement.js';
@@ -19,35 +27,44 @@ import { initialState, dateKey, uid, taskInput, blockInput, toggleCompletion, st
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
-export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || path.join(root, 'data'), aiUrl = process.env.EPISUITE_OLLAMA_URL || 'http://127.0.0.1:11434/api/generate', notificationFetch = fetch, rewardRandom, backgroundInterval = 30000 } = {}) {
-  await mkdir(dataDir, { recursive: true });
+export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || path.join(root, 'data'), aiUrl = process.env.EPISUITE_OLLAMA_URL || 'http://127.0.0.1:11434/api/generate', notificationFetch = fetch, bookFetch = fetch, rewardRandom, backgroundInterval = 30000, watchToken = process.env.EPISUITE_WATCH_TOKEN } = {}) {
+  await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const file = path.join(dataDir, 'episuite.json');
   const cosmetics = JSON.parse(await readFile(path.join(root, 'public/cosmetics.json'), 'utf8'));
-  let state;
+  let state, fresh = false;
   try { state = JSON.parse(await readFile(file, 'utf8')); }
-  catch (error) { if (error.code !== 'ENOENT') throw new Error('Episuite data cannot be read. Restore a backup before starting.'); state = initialState(); if(process.env.EPISUITE_TIMEZONE){new Intl.DateTimeFormat('en',{timeZone:process.env.EPISUITE_TIMEZONE});state.settings.timezone=process.env.EPISUITE_TIMEZONE;} }
+  catch (error) { if (error.code !== 'ENOENT') throw new Error('Episuite data cannot be read. Restore a backup before starting.'); fresh = true; state = initialState(); if(process.env.EPISUITE_TIMEZONE){new Intl.DateTimeFormat('en',{timeZone:process.env.EPISUITE_TIMEZONE});state.settings.timezone=process.env.EPISUITE_TIMEZONE;} }
   if (state.version !== 1 || !Array.isArray(state.tasks) || !Array.isArray(state.blocks)) throw new Error('Episuite data has an unsupported format. Restore a valid backup.');
   const defaults = initialState();
   state = { ...defaults, ...state, settings: { ...defaults.settings, ...state.settings }, calendar: { ...defaults.calendar, ...state.calendar } };
   normalizeSocial(state);
   normalizeLife(state);
-  state.rewardEvents = {config:rewardConfig({},state.rewardEvents?.config||rewardDefaults)};
+  normalizeProductivity(state);
+  normalizeReading(state);
+  const searchBooks = createBookSearch(bookFetch);
+  if (fresh) {
+    Object.assign(state.settings, { quietFocus: true, showStreaks: false });
+    state.life.board.showFlame = false;
+  }
+  state.rewardEvents = {config:rewardConfig(fresh ? { enabled: false } : {},state.rewardEvents?.config||rewardDefaults)};
   normalizeScreenTime(state);
-  state.notifications ||= {config:{...notificationDefaults},jobs:[]};
+  state.notifications ||= {config:{...notificationDefaults, boosts: !fresh},jobs:[]};
   state.notifications.jobs=state.notifications.jobs.filter(j=>!(j.kind==='boosts'&&j.id.startsWith('boost:')&&j.status==='pending'));
   for(const block of state.blocks)assignBlockColor(block,state.blocks.filter(b=>b!==block));
   let queue = Promise.resolve();
-  const save = async () => { await writeFile(`${file}.tmp`, JSON.stringify(state, null, 2)); await rename(`${file}.tmp`, file); };
+  const save = () => writeWorkspace(file, state);
   if(!state.workspaceId){state.workspaceId=uid();await save();}
   const safeState = () => { const result = structuredClone(state); result.automation={configured:Boolean(state.automation.token)}; result.screentime={outstanding:Object.keys(state.screentime.keys).length}; result.notifications = publicNotifications(result.notifications); result.calendar.password = ''; result.calendar.configured = Boolean(state.calendar.password); if (result.archivedLegacy) result.archivedLegacy = '[Preserved on server; available in export]'; return result; };
   const mutate = (operation, notify = true) => {
     const job = queue.then(async () => { const before = structuredClone(state); try {
       const result = await operation();
-      for(const session of notify?state.sessions.filter(s=>!before.sessions.some(old=>old.id===s.id)):[]){
+      const previousSessions = new Set(before.sessions.map(session => session.id));
+      for(const session of notify?state.sessions.filter(s=>!previousSessions.has(s.id)):[]){
         enqueueNotification(state,'timer:'+session.id,'timers',session.mode==='focus'?'Focus saved':'Break finished',`${session.minutes} minutes saved${session.coins?' · '+session.coins+' coins':''}.`,Date.now());
       }
-      if(notify)for(const task of state.tasks){
-        const previous=before.tasks.find(t=>t.id===task.id),known=new Set(Object.values(previous?.history||{}).flat().map(e=>e.id));
+      const previousTasks = new Map(before.tasks.map(task => [task.id, task]));
+      if(notify && state.notifications.config.enabled && state.notifications.config.boosts && !(state.settings.quietFocus && state.timer?.mode === 'focus'))for(const task of state.tasks){
+        const previous=previousTasks.get(task.id),known=new Set(Object.values(previous?.history||{}).flat().map(e=>e.id));
         for(const entry of Object.values(task.history||{}).flat().filter(e=>!known.has(e.id)&&e.coins>=250&&['epic','jackpot'].includes(e.rewardTier))){
           enqueueNotification(state,`payout:${task.id}:${entry.rollKey}`,'boosts',entry.rewardTier==='jackpot'?'Jackpot!':'Rare task reward',`${task.title} earned ${entry.coins} coins.`,Date.now());
         }
@@ -62,7 +79,6 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     queue = job.catch(() => {}); return job;
   };
   const json = (res, value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
-  const body = async req => { let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 5_000_000) throw fail('Backup is too large.', 413); } try { const parsed = JSON.parse(raw || '{}'); if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Error(); return parsed; } catch { throw fail('Send a valid JSON object.'); } };
   async function route(req, res) {
     const url = new URL(req.url, 'http://localhost'), p = url.pathname;
     const date = url.searchParams.get('date') || dateKey(Date.now(), state.settings.timezone);
@@ -75,6 +91,10 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     const shellNavigation = req.method === 'GET' && ['/', '/index.html'].includes(p)
       && req.headers['sec-fetch-mode'] === 'navigate' && req.headers['sec-fetch-dest'] === 'document';
     if (req.headers['sec-fetch-site'] === 'cross-site' && !shellNavigation) throw fail('Cross-site requests are blocked.', 403);
+    assertApiMethod(p, req.method);
+    if (req.method === 'GET' && p === '/api/books/search') {
+      return json(res, { books: await searchBooks(url.searchParams.get('q')) });
+    }
     if (req.method === 'GET' && p === '/api/state') {
       await queue;
       const currentDay = dateKey(Date.now(), state.settings.timezone);
@@ -93,13 +113,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         const expiredId=state.timer.id;
         await mutate(()=>{
           if(state.timer?.id!==expiredId||remaining(state.timer)>0)return null;
-          const session=finishTimer(state);
-          if(session?.mode==='focus'&&state.settings.autoBreak){
-            const count=state.sessions.filter(s=>s.mode==='focus'&&s.full).length,mode=count&&count%state.settings.cycles===0?'long':'short';
-            startTimer(state,{mode,minutes:mode==='long'?state.settings.longBreak:state.settings.shortBreak},session.at);
-            if(remaining(state.timer)===0)finishTimer(state);
-          }
-          return session;
+          return advanceExpiredTimer(state);
         });
       }
       if (state.redemption && state.redemption.deadline <= Date.now()) await mutate(() => { state.redemption = null; });
@@ -116,16 +130,28 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         // Legacy backups can contain credentials; never include them in a new backup.
         data.archivedLegacy = JSON.parse(JSON.stringify(data.archivedLegacy, (k, v) => /password|token|secret/i.test(k) ? undefined : v));
       }
-      return json(res, data);
+      const backup = JSON.stringify(data);
+      if (Buffer.byteLength(backup) > backupMaxBytes) {
+        throw fail('This workspace exceeds the portable backup limit. Stop the service and back up its data directory.', 413);
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': 'attachment; filename="episuite-backup.json"'
+      });
+      return res.end(backup);
     }
     if (req.method === 'GET' && p === '/api/calendar.ics') { const text = calendarText(state, date, url.searchParams.get('end') || date); res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': 'attachment; filename="episuite.ics"' }); return res.end(text); }
     if (req.method === 'GET' && p === '/api/v1/day') {
+      if (watchToken) {
+        const digest = value => createHash('sha256').update(value).digest();
+        if (!timingSafeEqual(digest(req.headers.authorization || ''), digest(`Bearer ${watchToken}`))) throw fail('A valid watch token is required.', 401);
+      }
       const blocks = schedule(state, date).map((b, i) => ({ ...b, block_index: i, start: b.startMinute === null ? null : new Date(zonedTimestamp(date, b.startMinute, state.settings.timezone)).toISOString(), end: b.endMinute === null ? null : new Date(zonedTimestamp(date, b.endMinute, state.settings.timezone)).toISOString(), tasks: b.taskIds.map(id => state.tasks.find(t => t.id === id)).filter(t => t && !t.deleted).map(t => ({ id: t.id, title: t.title, block_index: i, status: done(t, date) ? 'completed' : 'pending', duration_minutes: t.minutes })) }));
       return json(res, { day: { wakeup_time: state.wake[date] || null, blocks, tasks: blocks.flatMap(b => b.tasks) } });
     }
     if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE') {
-      const data = await body(req);
       if (p.startsWith('/api/') && req.method !== 'DELETE' && req.headers['content-type']?.split(';')[0] !== 'application/json') throw fail('Use application/json.', 415);
+      const data = await readJson(req, p === '/api/import' ? backupMaxBytes : undefined);
       if (p === '/api/ai/breakdown') {
         const title = String(data.title || '').slice(0, 300);
         if (!title) throw fail('Choose a task first.');
@@ -139,6 +165,48 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         } catch { throw fail('Ollama is unavailable or returned an invalid response. You can add small steps yourself.', 503); }
       }
       const result = await mutate(async () => {
+        if (p === '/api/books') {
+          let createId;
+          if (data.eventId !== undefined) {
+            if (typeof data.eventId !== 'string' || !/^[a-z0-9-]{1,100}$/i.test(data.eventId)) throw fail('Use a valid book creation ID.');
+            createId = data.eventId;
+            const saved = state.reading.books.find(book => book.id === createId);
+            if (saved) {
+              if (saved.title !== String(data.title || '').trim().slice(0, 300)) throw fail('This creation ID already belongs to another book.', 409);
+              return saved;
+            }
+          }
+          const book = bookInput(data, { id: createId }, date);
+          book.editVersion = 1;
+          state.reading.books.push(book);
+          return book;
+        }
+        if (p === '/api/reading/task') return updateReadingTask(state, data);
+        const bookMatch = p.match(/^\/api\/books\/([^/]+)(?:\/(log))?$/);
+        if (bookMatch) {
+          const book = state.reading.books.find(item => item.id === bookMatch[1]);
+          if (!book) throw fail('Book not found.', 404);
+          if (bookMatch[2] === 'log') return logReading(state, book, data, date, base => coinAward(state, base, Date.now(), rewardRandom));
+          if (Number(data.expectedVersion) !== book.editVersion) throw fail('This book changed on another device. Reopen it before saving.', 409);
+          if (req.method === 'DELETE') {
+            state.reading.books = state.reading.books.filter(item => item.id !== book.id);
+            return { ok: true };
+          }
+          const updated = bookInput(data, book, date);
+          updated.editVersion++;
+          Object.assign(book, updated);
+          return book;
+        }
+        if (p === '/api/day/priority' && req.method === 'POST') return setPriority(state, date, data);
+        if (p === '/api/weekly-review' && req.method === 'POST') {
+          const review = reviewInput(data), week = weekStart(date);
+          const previous = state.weeklyReviews[week];
+          if ('expectedVersion' in data && Number(data.expectedVersion) !== (previous?.editVersion || 0)) {
+            throw fail('This weekly review changed on another device. Reopen the review.', 409);
+          }
+          state.weeklyReviews[week] = { ...review, editVersion: (previous?.editVersion || 0) + 1 };
+          return review;
+        }
         if(p==='/api/automation/token'&&req.method==='POST'){const token=data.disable?(state.automation={token:'',receipts:{}},null):rotateAutomation(state);return {token};}
         if(p==='/api/automation/complete'&&req.method==='POST'){authorizeAutomation(state,req.headers.authorization);return completeAutomation(state,data,date,base=>coinAward(state,base,Date.now(),rewardRandom));}
         if(p==='/api/life/board'&&req.method==='POST'){if(data.expectedBoardVersion!==state.life.boardVersion)throw fail('Your board changed on another device. Close and reopen Customize to load it.',409);state.life.board=boardInput(data,state,state.life.board);state.life.boardVersion++;return state.life.board;}
@@ -173,12 +241,31 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           return state.onboarding;
         }
         if (p === '/api/tasks' && req.method === 'POST') { const task = taskInput(data); validatePeople(state,task.personIds); if (task.lane === 'today' && state.tasks.filter(t => t.lane === 'today' && !t.deleted && !done(t, date)).length >= 3) throw fail('Keep today small: move a task back to your inbox first.'); task.order = Math.max(0, ...state.tasks.map(t => t.order)) + 1; state.tasks.push(task); return task; }
-        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move|undo|purge))?$/);
+        const taskMatch = p.match(/^\/api\/tasks\/([^/]+)(?:\/(complete|restore|move|undo|purge|habit))?$/);
         if (taskMatch) {
           const [, id, action] = taskMatch, t = state.tasks.find(t => t.id === id);
           if (!t) throw fail('Task not found.', 404);
           if('expectedVersion' in data&&Number(data.expectedVersion)!==(t.editVersion||0))throw fail('This task changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409);
           if(action==='purge'){if(req.method!=='DELETE')throw fail('Use DELETE for permanent deletion.',405);return purgeTask(state,id,data.confirmation);}
+          if (action === 'habit') {
+            if (req.method !== 'POST') throw fail('Use POST to record a habit action.', 405);
+            if (t.deleted || t.repeat === 'none') throw fail('Choose an active repeating habit.');
+            if (data.action === 'undo-rest') {
+              const rests = habitRestCount(t, date);
+              if (rests > 1) t.habitRest[date] = rests - 1;
+              else delete t.habitRest?.[date];
+            } else if (data.action === 'rest' || data.action === 'minimum') {
+              if (!isDue(t, date)) throw fail('There is no habit opportunity available right now.');
+              if (data.action === 'rest') {
+                t.habitRest ||= {};
+                t.habitRest[date] = habitRestCount(t, date) + 1;
+              } else {
+                toggleCompletion(state, id, date, base => coinAward(state, base, Date.now(), rewardRandom));
+                syncContactCompletion(state, t);
+              }
+            } else throw fail('Choose a valid habit action.');
+            return { completed: countToday(t, date), rest: habitRestCount(t, date) };
+          }
           if(action==='undo'){const delta=undoLastCompletion(state,id,date);syncContactCompletion(state,t);return {delta};}
           if (action === 'complete') {const delta=toggleCompletion(state,id,date,base=>coinAward(state,base,Date.now(),rewardRandom));syncContactCompletion(state,t);const award=delta>0?(t.repeat==='none'?Object.values(t.history).flat().at(-1):t.history[date]?.at(-1)):null;return {delta,award};}
           if (action === 'restore') { t.deleted = false; t.lane = 'inbox'; return t; }
@@ -194,7 +281,26 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         if (blockMatch) { const b = state.blocks.find(b => b.id === blockMatch[1]); if (!b) throw fail('Block not found.', 404); if('expectedVersion' in data&&Number(data.expectedVersion)!==(b.editVersion||0))throw fail('This block changed on another device. Your draft is kept. Reopen the editor to load the latest version.',409); if(b.caldav?.readOnly)throw fail('Edit recurring or all-day server events in your calendar client, then sync again.'); if (req.method === 'DELETE') { state.blocks = state.blocks.filter(x => x.id !== b.id); return { ok: true }; } if(b.caldav&&data.repeat&&data.repeat!=='none')throw fail('Set recurrence in your calendar client, then sync again.'); const updated=blockInput(data,b);validatePeople(state,updated.personIds);assignBlockColor(updated,state.blocks.filter(x=>x.id!==b.id));Object.assign(b,updated); return b; }
         if (p === '/api/schedule/shift') { const shift = finite(data.minutes, -120, 120, 15); for (const b of state.blocks.filter(b => b.date === date && b.mode === 'relative')) b.shift += shift; return { ok: true }; }
         if (p === '/api/day/wake') { state.wake[date] = Date.now(); return { ok: true }; }
-        if (p === '/api/day/end') { for (const t of state.tasks.filter(t => t.lane === 'today' && !t.completed)) t.lane = 'inbox'; state.checkins[date] = { ...state.checkins[date], reflection: String(data.reflection || '').slice(0, 2000), ended: true }; return { ok: true }; }
+        if (p === '/api/day/end') {
+          const task = dayPriority(state, date);
+          const tomorrow = addDays(date, 1);
+          if (task && !done(task, date) && data.rollover === 'carry' && state.dayPlans[tomorrow]?.taskId && state.dayPlans[tomorrow].taskId !== task.id) {
+            throw fail('Tomorrow already has a priority. Choose a schedule block or keep this task in All tasks.', 409);
+          }
+          if (task && !done(task, date) && data.rollover === 'carry' && !state.dayPlans[tomorrow]?.taskId) {
+            setPriority(state, tomorrow, state.dayPlans[date]);
+          }
+          const previousRollover = state.blocks.find(block => block.id === state.checkins[date]?.rolloverBlockId && block.taskIds?.includes(task?.id));
+          if (task && !done(task, date) && data.rollover === 'schedule' && !previousRollover) {
+            const block = blockInput({ name: task.title, date: tomorrow, start: data.start, duration: task.minutes, taskIds: [task.id] });
+            assignBlockColor(block, state.blocks);
+            state.blocks.push(block);
+            state.checkins[date] = { ...state.checkins[date], rolloverBlockId: block.id };
+          }
+          for (const t of state.tasks.filter(t => t.lane === 'today' && !t.completed)) t.lane = 'inbox';
+          state.checkins[date] = { ...state.checkins[date], reflection: String(data.reflection || '').slice(0, 2000), ended: true };
+          return { ok: true };
+        }
         if (p === '/api/checkin') { state.checkins[date] = { ...state.checkins[date], energy: ['low', 'medium', 'high'].includes(data.energy) ? data.energy : 'medium' }; return { ok: true }; }
         if (p === '/api/templates/save') { const blocks = state.blocks.filter(b => b.date === date); if (!blocks.length) throw fail('Add a block before saving a routine.'); const name = String(data.name || '').trim().slice(0, 120); if (!name) throw fail('Name your routine.'); state.templates.push({ id: uid(), name, blocks: blocks.map(b => ({ ...b, repeat: 'none' })) }); return { ok: true }; }
         if (p === '/api/templates/apply') { const template = state.templates.find(t => t.id === data.id); if (!template) throw fail('Routine not found.', 404); for (const b of template.blocks) state.blocks.push(blockInput({ ...b, date, taskIds: b.taskIds.filter(id => state.tasks.some(t => t.id === id && !t.deleted)) }, { ...b, id: uid(), shift: 0 })); return { ok: true }; }
@@ -209,7 +315,14 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         if (p === '/api/timer/resume') return resumeTimer(state);
         if (p === '/api/timer/finish') return finishTimer(state, Date.now(), Boolean(data.early));
         if (p === '/api/timer/reset') { state.timer = null; return { ok: true }; }
-        if (p === '/api/notes') { const text = String(data.text || '').trim().slice(0, 3000); if (!text) throw fail('Write something to capture.'); const id = typeof data.id === 'string' && /^[a-z0-9-]{1,80}$/i.test(data.id) ? data.id : uid(); if (!state.notes.some(n => n.id === id)) state.notes.unshift({ id, text, created: finite(data.created, 0, Date.now(), Date.now()) }); return { ok: true }; }
+        if (p === '/api/notes') {
+          if (data.workspace && data.workspace !== state.workspaceId) throw fail('This capture belongs to another workspace.', 409);
+          const text = String(data.text || '').trim().slice(0, 3000);
+          if (!text) throw fail('Write something to capture.');
+          const id = typeof data.id === 'string' && /^[a-z0-9-]{1,80}$/i.test(data.id) ? data.id : uid();
+          if (!state.notes.some(note => note.id === id)) state.notes.unshift({ id, text, created: finite(data.created, 0, Date.now(), Date.now()) });
+          return { ok: true };
+        }
         if (p === '/api/notes/convert') { const note = state.notes.find(n => n.id === data.id); if (!note) throw fail('Capture not found.', 404); state.tasks.push(taskInput({ title: note.text, lane: 'inbox' })); state.notes = state.notes.filter(n => n.id !== note.id); return { ok: true }; }
         if (p === '/api/notes/delete') { state.notes = state.notes.filter(n => n.id !== data.id); return { ok: true }; }
         if (p === '/api/categories') { const name = String(data.name || '').trim().slice(0, 50); if (!name) throw fail('Name the category.'); if (data.remove) { state.categories = state.categories.filter(c => c !== name); state.tasks.filter(t => t.category === name).forEach(t => t.category = 'Personal'); } else if (!state.categories.includes(name)) state.categories.push(name); return { ok: true }; }
@@ -231,7 +344,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           const s = state.settings;
           if('calendarPastStyle' in data){if(!['gray','cross'].includes(data.calendarPastStyle))throw fail('Choose gray or X for past calendar days.');s.calendarPastStyle=data.calendarPastStyle;}
           if('mobilePages' in data){const allowed=['life','now','tasks','plan','social','focus','capture','progress','rewards'];if(!Array.isArray(data.mobilePages)||data.mobilePages.length!==4||new Set(data.mobilePages).size!==4||data.mobilePages.some(id=>!allowed.includes(id)))throw fail('Choose four different mobile pages.');s.mobilePages=data.mobilePages;}
-          for (const key of ['sound', 'gamification', 'reducedMotion', 'lowStim', 'autoBreak']) if (key in data) s[key] = Boolean(data[key]);
+          for (const key of ['sound', 'gamification', 'reducedMotion', 'lowStim', 'autoBreak', 'quietFocus', 'showStreaks', 'disableLetterShortcuts']) if (key in data) s[key] = Boolean(data[key]);
           for (const key of ['focusMinutes', 'shortBreak', 'longBreak']) if (key in data) s[key] = finite(data[key], 1, 120, s[key]);
           if ('volume' in data) s.volume = finite(data.volume, 0, 1, s.volume);
           if ('partialThreshold' in data) s.partialThreshold = finite(data.partialThreshold, 50, 100, 90);
@@ -246,8 +359,49 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           if ('ollamaModel' in data) s.ollamaModel = String(data.ollamaModel).slice(0, 100);
           return { ok: true };
         }
-        if (p === '/api/import') { await save(); await copyFile(file, path.join(dataDir, `before-import-${Date.now()}.json`)); const imported=legacyImport(data,state); imported.workspaceId=state.workspaceId; imported.automation=state.automation; normalizeLife(imported); imported.life.shortcuts=imported.life.shortcuts.map(s=>({id:uid(),...shortcutInput(s)})); imported.notifications=state.notifications; imported.rewardEvents={config:rewardConfig(data.rewardEvents?.config||{},state.rewardEvents.config)}; preserveScreenTime(imported,state); for(const reward of imported.rewards)Object.assign(reward,rewardInput(reward,reward)); if(imported.engagement)imported.engagement=engagementInput(imported.engagement); if(imported.feelings){if(!Array.isArray(imported.feelings))throw fail('Backup feelings must be a list.'); imported.feelings=imported.feelings.slice(-60).map(f=>feelingInput(f,imported));} normalizeSocial(imported);for(const block of imported.blocks)assignBlockColor(block,imported.blocks.filter(b=>b!==block));state=imported; return { ok: true }; }
-        if (p === '/api/calendar/config') { const parsed = data.url ? new URL(data.url) : null; if (parsed && !['https:', 'http:'].includes(parsed.protocol)) throw fail('Use an HTTP or HTTPS calendar URL.'); state.calendar.url = String(data.url || '').slice(0, 2000); state.calendar.username = String(data.username || '').slice(0, 300); if (data.password) state.calendar.password = String(data.password).slice(0, 500); return { ok: true }; }
+        if (p === '/api/import') {
+          const imported = legacyImport(data, state);
+          imported.workspaceId = state.workspaceId;
+          imported.automation = state.automation;
+          normalizeLife(imported);
+          normalizeProductivity(imported);
+          normalizeReading(imported);
+          imported.life.shortcuts = imported.life.shortcuts.map(shortcut => ({ id: shortcut.id || uid(), ...shortcutInput(shortcut) }));
+          imported.notifications = state.notifications;
+          imported.rewardEvents = { config: rewardConfig(data.rewardEvents?.config || {}, state.rewardEvents.config) };
+          preserveScreenTime(imported, state);
+          for (const reward of imported.rewards) Object.assign(reward, rewardInput(reward, reward));
+          if (imported.engagement) imported.engagement = engagementInput(imported.engagement);
+          if (imported.feelings) {
+            if (!Array.isArray(imported.feelings)) throw fail('Backup feelings must be a list.');
+            imported.feelings = imported.feelings.slice(-60).map(feeling => feelingInput(feeling, imported));
+          }
+          normalizeSocial(imported);
+          for (const block of imported.blocks) assignBlockColor(block, imported.blocks.filter(other => other !== block));
+          await save();
+          const recovery = path.join(dataDir, `before-import-${Date.now()}-${uid()}.json`);
+          await copyFile(file, recovery);
+          if (process.platform !== 'win32') await chmod(recovery, 0o600);
+          state = imported;
+          return { ok: true };
+        }
+        if (p === '/api/calendar/config') {
+          const url = String(data.url || '').trim();
+          if (url) {
+            let parsed;
+            try { parsed = new URL(url); } catch { throw fail('Use a valid calendar collection URL.'); }
+            if (url.length > 2000 || !['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash || parsed.search) {
+              throw fail('Use an HTTP or HTTPS calendar collection URL without embedded credentials, query, or fragment.');
+            }
+          }
+          const { calendar } = state;
+          const username = String(data.username || '').slice(0, 300);
+          const password = data.password ? String(data.password).slice(0, 500) : calendar.password;
+          if (calendar.url !== url || calendar.username !== username || calendar.password !== password) {
+            Object.assign(calendar, { url, username, password, connectionRevision: (calendar.connectionRevision || 0) + 1 });
+          }
+          return { ok: true };
+        }
         throw fail('This action was not found.', 404);
       },p!=='/api/import');
       if(p==='/api/screentime/redeem')return json(res,result);
@@ -265,6 +419,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     assets['/life.js'] = ['life.js', 'text/javascript'];
     assets['/social.js'] = ['social.js', 'text/javascript'];
     assets['/social-domain.js'] = ['social-domain.js', 'text/javascript'];
+    for (const file of ['productivity.js', 'device-storage.js', 'productivity-ui.js', 'books-domain.js', 'books.js']) assets['/' + file] = [file, 'text/javascript'];
     for(const file of ['icon-192.png','icon-512.png','apple-touch-icon.png'])assets['/'+file]=[file,'image/png'];
     if (!assets[p]) throw fail('Page not found.', 404);
     const [asset, type] = assets[p]; const content = await readFile(path.join(root, 'public', asset));
@@ -279,20 +434,24 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   let calendarQueue=Promise.resolve();
   function routeCalendar(req,res){const job=calendarQueue.then(()=>runCalendar(req,res));calendarQueue=job.catch(()=>{});return job;}
   async function runCalendar(req, res) {
-    if (req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) throw fail('Cross-site requests are blocked.', 403);
-    const data = await body(req), date = data.date || dateKey(Date.now(), state.settings.timezone);
+    if (req.headers['sec-fetch-site'] === 'cross-site' || req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) throw fail('Cross-site requests are blocked.', 403);
+    if (req.headers['content-type']?.split(';')[0] !== 'application/json') throw fail('Use application/json.', 415);
+    const data = await readJson(req), date = data.date || dateKey(Date.now(), state.settings.timezone);
     if (!validDate(date)) throw fail('Choose a valid date.');
     const dates = calendarDates(date, data.end || date);
     if (!state.calendar.url || !state.calendar.password) throw fail('Save your calendar collection URL and credentials first.');
     const snapshot=structuredClone(state);
     const result=await syncCalDAV(snapshot,dates,req.url.split('?')[0]==='/api/calendar/delete');
     await mutate(()=>{
-      if(state.calendar.url!==snapshot.calendar.url)throw fail('Calendar connection changed during sync. Sync again.',409);
+      if ((state.calendar.connectionRevision || 0) !== (snapshot.calendar.connectionRevision || 0)) {
+        throw fail('The calendar connection changed after remote sync began. Check the remote calendar and sync again to reconcile.', 409);
+      }
       const before=new Map(snapshot.blocks.map(b=>[b.id,JSON.stringify(b)]));
       const after=new Map(result.blocks.map(b=>[b.id,b]));
       for(let i=state.blocks.length-1;i>=0;i--){const b=state.blocks[i];if(before.get(b.id)!==JSON.stringify(b))continue;if(after.has(b.id))Object.assign(b,after.get(b.id));else state.blocks.splice(i,1);}
       for(const b of result.blocks)if(!before.has(b.id)&&!state.blocks.some(x=>x.id===b.id)){assignBlockColor(b,state.blocks);state.blocks.push(b);}
-      state.calendar=result.calendar;
+      const { eventUrls, syncRecords } = result.calendar;
+      Object.assign(state.calendar, { eventUrls, syncRecords });
     });
     return json(res,{...result,blocks:undefined,calendar:undefined,state:safeState()});
   }
@@ -305,13 +464,11 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
       const reminders=state.notifications.config.enabled&&state.notifications.config.reminders?dueReminders(state,now):[];
       if(state.timer?.status==='running'&&remaining(state.timer,now)===0||reminders.some(r=>!state.notifications.jobs.some(j=>j.id==='reminder:'+r.id)))await mutate(()=>{
         for(const r of reminders)enqueueNotification(state,'reminder:'+r.id,'reminders','Upcoming: '+r.name,`${r.name} starts at ${new Intl.DateTimeFormat('en',{timeZone:state.settings.timezone,hour:'numeric',minute:'2-digit'}).format(new Date(r.startsAt))}${r.location?' · '+r.location:''}.`,now,r.startsAt+60000);
-        if(state.timer?.status==='running'&&remaining(state.timer,now)===0){
-          const session=finishTimer(state,now);
-          if(session?.mode==='focus'&&state.settings.autoBreak){const count=state.sessions.filter(s=>s.mode==='focus'&&s.full).length,mode=count&&count%state.settings.cycles===0?'long':'short';startTimer(state,{mode,minutes:mode==='long'?state.settings.longBreak:state.settings.shortBreak},session.at);if(remaining(state.timer,now)===0)finishTimer(state,now);}
-        }
+        advanceExpiredTimer(state, now);
       });
       if(!state.notifications.config.enabled)return;
       for(const snapshot of state.notifications.jobs.filter(j=>j.status==='pending'&&j.nextAt<=now).slice(0,10).map(j=>structuredClone(j))){
+        if (snapshot.kind === 'boosts' && state.settings.quietFocus && state.timer?.mode === 'focus') continue;
         const config=structuredClone(state.notifications.config);
         let error=null;
         if(snapshot.expiresAt>now)try{await sendNotification(config,snapshot,notificationFetch);}catch(e){error=e.message.startsWith('Provider returned HTTP')?e.message:'Delivery failed. Check the connection and credentials.';}

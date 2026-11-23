@@ -9,6 +9,11 @@ export function purgeTask(state, id, confirmation) {
   for (const template of state.templates || []) for (const block of template.blocks || []) block.taskIds = (block.taskIds || []).filter(taskId => taskId !== id);
   for (const session of state.sessions) if (session.taskId === id) session.taskId = null;
   if (state.timer?.taskId === id) state.timer.taskId = null;
+  for (const plan of Object.values(state.dayPlans || {})) if (plan.taskId === id) plan.taskId = '';
+  if (state.reading?.taskId === id) {
+    state.reading.taskId = 'none';
+    state.reading.taskVersion++;
+  }
   // Keep real social conversations; detach the deleted task's bookkeeping.
   for (const checkin of state.social?.checkins || []) if (checkin.taskId === id) { delete checkin.taskId; delete checkin.completionId; }
   if (state.life?.board) {

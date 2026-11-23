@@ -1,11 +1,13 @@
 AppSettingsPage({
   state: {
     serverUrl: '',
+    watchToken: '',
     saved: false
   },
 
   build(props) {
     this.state.serverUrl = props.settingsStorage.getItem('serverUrl') || ''
+    this.state.watchToken = props.settingsStorage.getItem('watchToken') || ''
 
     return Section({
       title: 'EpiBlock Server',
@@ -29,6 +31,11 @@ AppSettingsPage({
             marginBottom: '12px'
           }
         }),
+        TextInput({
+          placeholder: 'Watch token (if configured)',
+          value: this.state.watchToken,
+          onChange: (value) => { this.state.watchToken = value; this.state.saved = false }
+        }),
         Button({
           label: 'Save',
           style: {
@@ -42,7 +49,8 @@ AppSettingsPage({
             marginBottom: '8px'
           },
           onClick: () => {
-            props.settingsStorage.setItem('serverUrl', this.state.serverUrl)
+            props.settingsStorage.setItem('serverUrl', this.state.serverUrl.trim())
+            props.settingsStorage.setItem('watchToken', this.state.watchToken.trim())
             this.state.saved = true
             this.build(props)
           }

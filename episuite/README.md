@@ -2,6 +2,28 @@
 
 A single workspace for tasks, habits, time blocks, focus, ideas and optional rewards. Built alongside the original apps, which are unchanged.
 
+## Daily outcomes, habit plans, and quieter focus
+
+Life OS includes a **Reading** section. **Add a book** searches Open Library for title, author, and cover matches. Choose your book, check the page count against your edition, and save your starting page. **Log pages** records the page you reached and shows pages read today. Reaching the saved total moves the book to **Books read**. You can also mark a log as finished, or add an older book directly to the already-read shelf with its finish date. **Edit book** corrects metadata or page numbers. **All books** opens the full paginated shelf.
+
+Reading logs automatically find a single reading task when possible. Use the **Reading task** control to select a specific task or disable automatic check-offs. Each due task receives at most one automatic check-off per local workspace day, across all books. Repeated logs and request retries preserve the completed task and its rewards. Adding a book, editing a page, and recording an older finished book save your library without creating reading-task progress. A task with several daily check-offs receives one toward its target.
+
+Books and reading logs are stored with your workspace, synchronize across devices, and are included in JSON backups. Search needs a reachable Open Library service. **Add manually** works when a book cannot be found. Covers load from Open Library and fall back to a placeholder if unavailable.
+
+Today offers a meaningful outcome linked to a task, with estimates for your shortlist and scheduled blocks. The linked eligible task becomes your next action. Closing the day lets you keep an unfinished priority in All tasks, carry its outcome to tomorrow, or schedule a block tomorrow.
+
+Task editors include an explicit next action and optional habit cue, minimum version, and obstacle plan. Habits offer a minimum check-off, planned rest for an opportunity, and rest undo. History shows logged, rested, and missed opportunities over the last 28 days. Minimum check-offs count toward the existing daily target and keep the same undo/reward rules.
+
+Focus includes **Save where I am**, quick capture, a free short break, a generic distraction reset plan, and optional device Focus instructions. **Quiet focus** is independent of rewards. It keeps Today simpler, reduces interruption effects and completion sounds, and defers queued rare-payout delivery while focusing. Calendar reminders remain controlled by their own preference. New workspaces start with quiet focus, fixed task payouts, and streak displays off. Existing reward choices remain available.
+
+Progress includes a weekly review and optional audio/browsing-reset experiments. Trials store only condition, outcome, time, and optional friction on this browser. They expire after 30 days when next accessed or when the workspace opens. They are excluded from server state, backups, notifications, and automation. Use **Delete trial data** to remove them immediately. The browser cannot pause audio or enforce limits in other apps. Speech-free selection is a reminder to pause spoken audio on the device.
+
+Offline captures use transactional IndexedDB records scoped to workspace ID. Multiple tabs acknowledge individual note IDs. The app reports pending captures and local-storage failures. Old local capture queues migrate when their saved workspace matches. Task and timer edits continue to require the server.
+
+Portable JSON exports and imports share a 64 MiB UTF-8 byte limit. A successful export can be imported within that same limit. Larger workspaces require a stopped-service copy of the data directory. Imports validate first and save an owner-readable recovery copy before replacing state.
+
+Use the root [setup and verification guide](../README.md) for current commands. **npm run test:browser** uses the locked Playwright development dependency. **EPISUITE_BROWSER** selects an existing Chromium-family executable. Existing visual scripts also accept that setting. **npm run profile** measures startup, sync, capture writes, and weekly metrics on disposable synthetic histories.
+
 ## People, plans, and repeat habits
 
 The [release judge review](SOCIAL-JUDGE.md) records the walkthrough defects, fixes, and final scoped self-review score of **9.9/10**. Regression, browser, PWA installability and offline checks back the assessment; physical-phone installation and long-term outcomes have not been measured.
@@ -38,7 +60,7 @@ npm ci
 node server.mjs
 ```
 
-Open **http://127.0.0.1:3210**. `npm start` also works wherever npm is available. This development environment has Node but no npm on PATH, so the direct command was used and tested.
+Open **http://127.0.0.1:3210**. Both `npm start` and the direct Node command are supported.
 
 For another port, set `PORT`. Data is stored in `episuite/data/episuite.json`. `EPISUITE_DATA_DIR` changes that location. Run only one server process per data directory. Writes are serialized within that process and atomically replace the data file. Unreadable data stops startup rather than silently erasing it. Before imports, the server creates `before-import-*.json` recovery files in the same directory.
 
@@ -51,7 +73,9 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Open **http://YOUR-SERVER-IP:3210** on your phone, laptop and PC, using the same address on each. There are no accounts or separate device workspaces. Docker publishes the port on the home network. Keep it on your trusted network; use an authenticated HTTPS reverse proxy for access beyond it. Reverse-proxy the whole app at its own hostname/root, including /api/, and preserve the Host header.
+Compose publishes to loopback by default. Use Tailscale Serve or an authenticated HTTPS reverse proxy on the host and open its HTTPS address on every device. For intentional direct LAN access, set EPISUITE_BIND_ADDRESS to the host's LAN IP in .env. Each reachable client has owner access. Reverse-proxy the whole app at its own hostname/root, including /api/, and preserve the Host header.
+
+For the Zepp day feed, optionally set EPISUITE_WATCH_TOKEN on the server and the same watch token in Zepp settings. The token grants read access to /api/v1/day. Keep this feed behind your device/network access boundary.
 
 The named volume **episuite_episuite-data** keeps tasks, settings, captures, guide progress and sessions across container rebuilds. Run only one app container against that volume. Foreground clients check changes about every two seconds; unchanged responses carry no state payload. Stale task/block edits preserve your draft and request reopening the editor. Timer controls identify the shared session so an old device cannot stop a newer session. Automatic breaks are managed by the server.
 
@@ -142,7 +166,7 @@ The server checks every 30 seconds for rare task payout alerts, calendar reminde
 
 **Zepp watch:** the `watch/` directory contains the original companion with an updated display that uses Episuite's real block start/end timestamps and refreshes each minute. Build it with the existing Zepp workflow and device-specific assets from the original project. Point its server URL at a reachable Episuite address. `/api/v1/day?date=YYYY-MM-DD` supplies the day, blocks, task statuses and wake anchor. The API is tested; no physical watch or Zepp simulator was available.
 
-Direct Node startup binds to localhost by default; set HOST=0.0.0.0 for LAN use. Compose already exposes the shared home server. This is a personal, single-owner app.
+Direct Node startup and the published Compose port bind to loopback by default. Set HOST or EPISUITE_BIND_ADDRESS explicitly for intended LAN access. This is a personal, single-owner app.
 
 ## Verify
 

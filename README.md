@@ -22,7 +22,7 @@ docker compose -f episuite/docker-compose.yml up --build -d
 docker compose -f episuite/docker-compose.yml ps
 ```
 
-Open **http://YOUR-SERVER-IP:3210** from each device. No account creation is needed. Configuration overrides belong in **episuite/.env**; copy **episuite/.env.example** to that location if needed. The source tree contains no user workspace data. To move an existing workspace, export it from the old instance's Settings and import it into the new instance.
+The container publishes on **127.0.0.1:3210** by default. On the server, use Tailscale Serve or an authenticated HTTPS reverse proxy to reach it from your devices. For intentional direct LAN access, copy **episuite/.env.example** to **episuite/.env** and set **EPISUITE_BIND_ADDRESS** to the host's LAN IP. Every client with direct access has owner access. To move a workspace, export it from Settings and import it into the new instance.
 
 ## Update the server
 
@@ -42,17 +42,18 @@ To inspect startup issues:
 docker compose -f episuite/docker-compose.yml logs --tail=100 episuite
 ```
 
-Docker exposes a single-owner app on your trusted home network. HTTPS is needed for full phone installation/offline caching; use an authenticated reverse proxy if accessing it outside that network. Docker execution has not been verified on this development machine because Docker is not installed.
+Docker runs a single-owner app. HTTPS enables phone installation and offline caching. The container runtime itself still needs verification on your server.
 
 ## Develop and verify
 
-Requires Node.js 22 or newer, with no package installation for the current app:
+Requires Node.js 22 or newer. Install the locked dependencies once:
 
 ```sh
 cd episuite
-node server.mjs
-node --test tests/domain.test.mjs tests/server.test.mjs tests/integrations.test.mjs tests/extra.test.mjs tests/onboarding.test.mjs tests/engagement.test.mjs tests/home-server.test.mjs
-node scripts/check.mjs
+npm ci
+npm start
 ```
 
-Personal data, test output, local credentials/configuration, dependency folders and local agent files are ignored. Commit source changes and configuration examples only. The Git repository starts at this directory and is independent of any repository above it.
+Run **npm test** for all unit/integration tests and **npm run check** for source and asset checks. For the browser walkthrough, install Chromium with **npx playwright install chromium**, then run **npm run test:browser**. Set **EPISUITE_BROWSER** to an existing Chrome or Edge executable if preferred. **npm run verify** runs all three checks. **npm run profile** measures disposable small and multi-year workspaces.
+
+Personal data, test output, local credentials/configuration, dependency folders and local agent files are ignored. Commit source changes and configuration examples only.

@@ -1,4 +1,4 @@
-import {createRequire} from 'node:module';
+import {chromium,browserOptions,waitForCondition} from './browser-runtime.mjs';
 import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -7,8 +7,6 @@ import assert from 'node:assert/strict';
 import {createApp} from '../server.mjs';
 import {initialState,taskInput,blockInput,addDays,dateKey} from '../public/domain.js';
 import {personInput,circleInput} from '../public/social-domain.js';
-let require=createRequire(import.meta.url),chromium;
-try{({chromium}=require('playwright'));}catch{require=createRequire('C:/Users/Monty/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/package.json');({chromium}=require('playwright'));}
 const out=fileURLToPath(new URL('../test-results/page-layouts/',import.meta.url)),day=dateKey(),fixtures=[];
 const pages=['life','now','tasks','plan','social','focus','capture','progress','rewards','settings'];
 async function fixture(populated){
@@ -31,7 +29,7 @@ async function fixture(populated){
 let browser;const metrics=[];
 try{
  const populated=await fixture(true),empty=await fixture(false);
- browser=await chromium.launch({headless:true,executablePath:process.env.LIFE_BROWSER||'C:/Users/Monty/AppData/Local/ms-playwright/chromium-1248/chrome-win64/chrome.exe'});
+ browser=await chromium.launch({...browserOptions});
  const context=await browser.newContext(),page=await context.newPage(),errors=[];page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await context.route('**/favicon.ico',r=>r.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="28" height="28" rx="5" fill="#22c55e"/></svg>'}));
  await page.goto(populated.base+'/#tasks');await page.locator('.task-streak').first().waitFor();
@@ -49,7 +47,7 @@ try{
   await page.goto(f.base+'/#plan');for(const view of ['month','day','week','agenda']){await page.locator(`[data-action="calendar-view"][data-id="${view}"]`).click();await page.locator(`[data-action="calendar-view"][data-id="${view}"][aria-pressed="true"]`).waitFor();if(f.name==='empty'){assert.equal((await(await fetch(f.base+'/api/state')).json()).blocks.length,0);await page.waitForFunction(()=>document.querySelectorAll('.calendar-event,.calendar-day-count,.timeblock').length===0);}await page.evaluate(()=>window.scrollTo(0,0));assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(directory,'calendar-'+view+'.full.png'),fullPage:true});}
  }
  // Exercise the real controls behind progressive disclosure, not only their screenshots.
- await page.goto(populated.base+'/#settings');await page.locator('#settings-section').selectOption('rhythm');await page.locator('#f-focusMinutes').fill('30');await page.locator('[data-form="settings"] [type="submit"]').click();await page.waitForFunction(async()=> (await(await fetch('/api/state')).json()).settings.focusMinutes===30);assert.equal(populated.app.getState().settings.focusMinutes,30);
+ await page.goto(populated.base+'/#settings');await page.locator('#settings-section').selectOption('rhythm');await page.locator('#f-focusMinutes').fill('30');await page.locator('[data-form="settings"] [type="submit"]').click();await waitForCondition(()=>populated.app.getState().settings.focusMinutes===30);assert.equal(populated.app.getState().settings.focusMinutes,30);
  await page.locator('#settings-section').selectOption('data');await page.locator('[data-form="category"] input').fill('Creative');await page.locator('[data-form="category"] [type="submit"]').click();await page.waitForFunction(()=>[...document.querySelectorAll('.pill')].some(n=>n.textContent.includes('Creative')));
  await page.locator('#settings-section').selectOption('phone');assert.ok(await page.locator('[name="ntfyUrl"]').isVisible());assert.equal(await page.locator('[name="botToken"]').isVisible(),false);await page.locator('[name="provider"]').selectOption('telegram');assert.equal(await page.locator('[name="ntfyUrl"]').isVisible(),false);assert.ok(await page.locator('[name="botToken"]').isVisible());await page.locator('#main').focus();await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(out,'settings-phone-connection.png'),fullPage:true});
  await page.goto(populated.base+'/#tasks');await page.locator('[data-action="task-tab"][data-id="all"]').click();assert.ok(await page.locator('.task-row:visible').count()<=6);await page.locator('#task-search').fill('Stretch for five minutes');assert.equal(await page.locator('.task-row:visible').count(),1);await page.locator('.task-more summary').click();await page.locator('.task-more-menu [data-action="task-history"]').click();await page.locator('#dialog .heat-grid').waitFor();await page.locator('#dialog [data-action="close-dialog"]').click();

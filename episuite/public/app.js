@@ -11,6 +11,11 @@ import {calendarPanel, calendarRange, moveCalendar, commitmentForm, deliverRemin
 import {colorField} from './calendar.js';
 import {blockColor,nextEligibleAt,initialState} from './domain.js';
 import {circlesPage,socialPage,personForm,circleForm,checkinForm,peopleSelector,peopleChips,socialNow,socialProgress} from './social.js';
+import {dayPriority,duePriority,weekStart,focusConditions} from './productivity.js';
+import {habitRestCount} from './domain.js';
+import {loadSnapshot,saveSnapshot,pendingCaptures,enqueueCapture,acknowledgeCapture,experimentRecords,saveExperiment,clearExperiments} from './device-storage.js';
+import {priorityPanel,habitSummary,experimentSummary,focusTools} from './productivity-ui.js';
+import {bookTools} from './books.js';
 let socialCircle = '', socialQuery = '', eligibilityKey = '';
 
 let calendarView = matchMedia('(max-width:700px)').matches?'agenda':'month', checkingReminders = false;
@@ -27,6 +32,7 @@ window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();ins
 const pointText=n=>`${n} growth point${n===1?'':'s'}`;
 function canLeaveRunway(id){const t=state?.tasks.find(t=>t.id===id);return Boolean(t&&!t.deleted&&!done(t,today()));}
 function showWin(title,detail,before=null){
+  if (state.settings.quietFocus && state.timer?.mode === 'focus') return;
   const p=momentum(state,today());if(!p.prefs.feedback||!state.settings.gamification)return;
   $('#momentum-win')?.remove();clearTimeout(winTimeout);
   const card=document.createElement('section');card.id='momentum-win';card.className='momentum-win';card.setAttribute('aria-label','Work acknowledged');
@@ -42,7 +48,31 @@ function showWin(title,detail,before=null){
 }
 const today = () => dateKey(Date.now(), state?.settings.timezone || 'Africa/Cairo');
 const taskById = id => state.tasks.find(t => t.id === id);
-const next = () => chooseNext(state, today(), energy);
+const next = () => duePriority(state, today()) || chooseNext(state, today(), energy);
+
+function focusExperimentDialog(kind = 'audio') {
+  const isAudio = kind === 'audio';
+  const conditions = isAudio ? focusConditions : [['reset', 'Used my reset plan']];
+  showDialog(isAudio ? 'Log an audio trial' : 'Log a browsing reset',
+    `<p>Compare similar work blocks. This entry stays on this browser for up to 30 days.</p>
+    <input type="hidden" name="kind" value="${kind}">
+    ${select('Condition', 'condition', conditions, isAudio ? audioCondition : 'reset')}
+    ${select('Work outcome', 'outcome', [['advanced', 'Reached or advanced my outcome'], ['stalled', 'I started, with little progress'], ['skipped', 'I skipped this block']], 'advanced')}
+    ${select('Friction (optional)', 'friction', [[0, 'Leave blank'], [1, '1 · Easy'], [2, '2'], [3, '3'], [4, '4'], [5, '5 · Hard']], 0)}`,
+    'focus-experiment', 'Save on this device');
+}
+
+function weeklyReviewDialog() {
+  const review = state.weeklyReviews?.[weekStart(today())] || {};
+  showDialog('Weekly review',
+    `<input type="hidden" name="expectedVersion" value="${review.editVersion || 0}">` +
+    field('One outcome I moved forward', 'outcome', review.outcome, 'text', 'maxlength="240"') +
+    field('One thing that got in my way', 'friction', review.friction, 'text', 'maxlength="240"') +
+    field('One adjustment for next week', 'adjustment', review.adjustment, 'text', 'maxlength="240"'),
+    'weekly-review', 'Save review');
+}
+
+let audioCondition = 'usual';
 const navItems = [['life', '▧', 'LIFE OS'], ['now', '◉', 'Today'], ['tasks', '☷', 'Tasks'], ['plan', '▦', 'Calendar'], ['social', '♧', 'Social'], ['focus', '◷', 'Focus'], ['capture', '⌑', 'Capture'], ['progress', '↗', 'Progress'], ['rewards', '◇', 'Rewards']];
 const guideSteps = [
   {page:'now',name:'Today',title:'Your daily starting point',text:'Today keeps one next action, your timer, and up to three open tasks in view. You do not need to fill all three spaces.',tip:'The daily loop: choose one task → focus briefly → take a break. Close the day when you are done.'},
@@ -82,46 +112,76 @@ const timeText = seconds => `${String(Math.floor(seconds / 60)).padStart(2, '0')
 function toast(message, undo) { clearTimeout(toastTimeout); $('#toast').innerHTML = esc(message) + (undo ? btn('Undo', 'undo', undo, 'text compact') : ''); $('#toast').classList.add('show'); toastTimeout = setTimeout(() => $('#toast').classList.remove('show'), undo ? 9000 : 4500); }
 async function request(endpoint, data, method = 'POST') {
   if (!online) throw new Error('The server is offline. Your saved workspace is still here; reconnect to make changes.');
+  const backupFile = endpoint === '/api/import' && data instanceof Blob ? data : null;
   data={...data};
   const match=endpoint.split('?')[0].match(/^\/api\/(tasks|blocks)\/([^/]+)/);
   if(match&&!('expectedVersion' in data)){const record=state[match[1]].find(t=>t.id===match[2]);if(record)data.expectedVersion=record.editVersion||0;}
   if(/^\/api\/timer\/(pause|resume|finish|reset)$/.test(endpoint)&&!('timerId' in data))data.timerId=state.timer?.id||null;
-  const response = await fetch(endpoint, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data || {}) });
+  const response = await fetch(endpoint, { method, headers: { 'Content-Type': 'application/json' }, body: backupFile || JSON.stringify(data || {}) });
   const result = await response.json();
   if(result.state&&(!state||result.state.workspaceId!==state.workspaceId||result.state.revision>=state.revision)){state=result.state;cache();}
   if(!response.ok){if(response.status===409&&!$('#dialog').open)render();throw new Error(result.error||'Could not save. Try again.');}
   return result;
 }
-function cache() { try { localStorage.setItem('episuite.snapshot', JSON.stringify(state)); } catch {} }
-function captureQueue() { try { return JSON.parse(localStorage.getItem('episuite.captureQueue') || '[]'); } catch { return []; } }
+let pendingCount = 0, captureError = '', snapshotFailed = false, loading;
+function cache() { snapshotFailed = !saveSnapshot(state); }
 async function saveCapture(text) {
   const note = { id: uid(), text: String(text).trim().slice(0, 3000), created: Date.now() };
   if (!note.text) throw new Error('Write something to capture.');
-  if (online) { try { await request('/api/notes', note); return; } catch (e) { if (!(e instanceof TypeError)) throw e; online = false; } }
-  const queue = captureQueue(); queue.push(note);
-  localStorage.setItem('episuite.captureQueue', JSON.stringify(queue));
-  state.notes.unshift(note); cache();
+  if (online) { try { await request('/api/notes', { ...note, workspace: state.workspaceId }); return; } catch (e) { if (!(e instanceof TypeError)) throw e; online = false; } }
+  if (!state.workspaceId) throw Error('Reconnect to identify this workspace before saving offline.');
+  try { await enqueueCapture(state.workspaceId, note); }
+  catch { throw Error('This device could not save your thought. Keep this text and try again.'); }
+  pendingCount++;
+  state.notes.unshift(note);
+  cache();
 }
-async function syncCaptures() {
-  const queue = captureQueue();
-  for (const note of [...queue]) {
-    const response = await fetch('/api/notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(note) });
-    if (!response.ok) throw new Error('Your offline captures could not be synced. They are still saved on this device.');
-    queue.splice(queue.findIndex(n => n.id === note.id), 1); localStorage.setItem('episuite.captureQueue', JSON.stringify(queue));
+async function syncCaptures(workspace, queue) {
+  for (const { id, text, created } of queue) {
+    const response = await fetch('/api/notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text, created, workspace }) });
+    if (!response.ok) throw Error('Your offline captures are still on this device. Sync will retry.');
+    await acknowledgeCapture(workspace, id);
   }
-  return queue.length === 0;
 }
-async function load(initial = false) {
+function load(initial = false) {
+  loading ||= refreshWorkspace(initial).finally(() => { loading = undefined; });
+  return loading;
+}
+async function refreshWorkspace(initial) {
   try {
-    const headers=state?.workspaceId&&!captureQueue().length?{'If-None-Match':`"${state.workspaceId}:${state.revision}"`}:{};
+    const headers=state?.workspaceId?{'If-None-Match':`"${state.workspaceId}:${state.revision}"`}:{};
     const response = await fetch('/api/state',{headers});
-    if(response.status===304){const reconnect=!online;online=true;if(reconnect&&!$('#dialog').open)render();updateTimer();return;}
-    if (!response.ok) throw Error(); let incoming = await response.json();
-    if (captureQueue().length) { await syncCaptures(); incoming = await (await fetch('/api/state')).json(); toast('Your offline thoughts are safely synced.'); }
+    if (!response.ok && response.status !== 304) throw Error();
+    let incoming = response.status === 304 ? state : await response.json();
+    const previousPending = pendingCount, previousError = captureError;
+    let localCaptures = [];
+    try {
+      const workspace = incoming.workspaceId;
+      const pending = await pendingCaptures(workspace);
+      localCaptures = pending;
+      pendingCount = pending.length;
+      captureError = '';
+      if (pending.length) {
+        await syncCaptures(workspace, pending);
+        const refreshed = await fetch('/api/state');
+        if (!refreshed.ok) throw Error();
+        incoming = await refreshed.json();
+        localCaptures = await pendingCaptures(workspace);
+        pendingCount = localCaptures.length;
+        if (!pendingCount) toast('Your offline thoughts are safely synced.');
+      }
+    } catch {
+      captureError = 'Offline capture storage could not be checked. Saved captures will retry when available.';
+    }
+    if (localCaptures.length) {
+      const known = new Set(incoming.notes.map(note => note.id));
+      incoming.notes.unshift(...localCaptures.filter(note => !known.has(note.id)));
+    }
     if (state && incoming.workspaceId===state.workspaceId && incoming.revision < state.revision) return;
-    const changed = !state || incoming.revision !== state.revision || !online;
+    const changed = !state || incoming.workspaceId !== state.workspaceId || incoming.revision !== state.revision || !online || previousPending !== pendingCount || previousError !== captureError;
     const oldTimer = state?.timer, priorKeepsakes=state?keepsakes(state,today()):null;
     state = incoming; if(state.timer){timerMode=state.timer.mode;duration=state.timer.duration/60;} online = true; if (changed) cache();
+    if (initial) experimentRecords(state.workspaceId).catch(() => {});
     if (oldTimer && oldTimer.id!==state.timer?.id && incoming.sessions.some(s => s.id === oldTimer.id)) onTimerComplete(oldTimer,priorKeepsakes);
     if (initial && state.onboarding?.status==='active' && !location.hash) page=guideSteps[state.onboarding.step]?.page||'now';
     if (initial) { duration = state.timer ? state.timer.duration / 60 : state.settings.focusMinutes; timerMode = state.timer?.mode || 'focus'; energy = state.checkins[today()]?.energy || 'medium'; planDate = today(); }
@@ -129,8 +189,19 @@ async function load(initial = false) {
     updateTimer();
   } catch {
     online = false;
-    if (!state) { try { state = JSON.parse(localStorage.getItem('episuite.snapshot')); } catch {} }
-    if (state) { state.social ||= initialState().social;planDate ||= today(); render(); }
+    if (!state) state = loadSnapshot();
+    if (state) {
+      state.social ||= initialState().social;
+      state.reading ||= initialState().reading;
+      planDate ||= today();
+      try {
+        const pending = await pendingCaptures(state.workspaceId);
+        pendingCount = pending.length;
+        const syncedIds = new Set(state.notes.map(note => note.id));
+        state.notes.unshift(...pending.filter(note => !syncedIds.has(note.id)));
+      } catch { captureError = 'Offline capture storage is unavailable on this device.'; }
+      if (!$('#dialog').open && !document.activeElement?.matches('input,textarea,select')) render();
+    }
     else $('#app').innerHTML = `<main class="loading"><h1>Let's reconnect.</h1><p>Episuite needs its local server to open your workspace.</p>${btn('Try again', 'reload', '', 'primary')}</main>`;
   }
 }
@@ -148,16 +219,24 @@ function applyLook() {
 function mobileDockItems(){const available=navItems.filter(([id])=>id!=='rewards'||state.settings.gamification),requested=state.settings.mobilePages||['now','tasks','plan','focus'],ids=[...new Set([...requested,'now','tasks','plan','focus'])].filter(id=>available.some(n=>n[0]===id)).slice(0,4);return [...ids.map(id=>available.find(n=>n[0]===id)),['menu','⋯','More']];}
 function render() {
   if (!state) return;
+  const focus = document.activeElement;
+  const restoreFocus = focus?.matches('button[data-action]') && $('#app').contains(focus)
+    ? { action: focus.dataset.action, id: focus.dataset.id, step: focus.dataset.step } : null;
   if(!state.settings.gamification||!momentum(state,today()).prefs.feedback)$('#momentum-win')?.remove();
   if (!['now', 'tasks', 'plan', 'social', 'focus', 'capture', 'progress', 'rewards', 'settings', 'life', 'circles'].includes(page)) page = 'now';
   applyLook();
   const totalInbox = state.tasks.filter(t => !t.deleted && !done(t,today()) && (t.repeat==='none'||isDue(t,today()))).length;
-  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 5h21v6H12v3h12v5H12v3h15v6H6z" fill="currentColor"/></svg></span>episuite</div><nav class="nav" aria-label="Main navigation">${navItems.filter(([id]) => id !== 'rewards' || state.settings.gamification).map(([id, symbol, title]) => `<button data-action="nav" data-id="${id}" class="${page === id ? 'active' : ''}" ${page === id ? 'aria-current="page"' : ''}><span class="nav-symbol" aria-hidden="true">${symbol}</span>${title}${id === 'tasks' && totalInbox ? `<span class="count">${totalInbox}</span>` : id === 'capture' && state.notes.length ? `<span class="count">${state.notes.length}</span>` : ''}</button>`).join('')}</nav><div class="side-bottom"><div class="side-note"><span class="eyebrow">WORKSPACE SHORTCUTS</span><p><kbd>N</kbd> New task<br><kbd>C</kbd> Capture a thought<br><kbd>F</kbd> Focus</p></div><nav class="nav" aria-label="Preferences"><button data-action="nav" data-id="settings" class="${page === 'settings' ? 'active' : ''}"><span class="nav-symbol" aria-hidden="true">⚙</span>Settings</button></nav></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">Workspace <span aria-hidden="true">/</span> ${page === 'circles'?'Manage circles':page === 'settings' ? 'Settings' : navItems.find(n => n[0] === page)?.[2]} <span class="status ${online ? '' : 'offline'}"><span class="status-dot"></span>${online ? 'Synced to your server' : 'Offline · capture available'}</span></div><div class="top-actions">${state.timer && page !== 'focus' ? btn(`<span data-mini-timer>${timeText(remaining(state.timer))}</span> · ${state.timer.mode === 'focus' ? 'Focus' : 'Break'}`, 'nav', 'focus', 'soft') : ''}${btn('+ Capture <span class="kbd">C</span>', 'quick-capture', '', 'secondary')}${btn('Setup guide','guide-start','','text compact guide-entry')}<button data-action="nav" data-id="settings" class="avatar" aria-label="Open settings">${esc(state.settings.gamification && state.settings.equipped?.badge?.icon || (state.settings.name || 'Y')[0].toUpperCase())}</button>${btn('Settings', 'nav', 'settings', 'text compact mobile-settings')}</div></header><main id="main" class="content" tabindex="-1">${guidePanel()}${({ circles:()=>circlesPage(state), life:()=>lifePage(state,today(),{...lifeUI.view(),celebration:shouldIgnite()}), now: nowPage, tasks: tasksPage, plan: planPage, social: () => socialPage(state,today(),{circle:socialCircle,query:socialQuery}), focus: focusPage, capture: capturePage, progress: progressPage, rewards: rewardsPage, settings: settingsPage })[page]()}</main></div></div><nav class="phone-dock" aria-label="Quick phone navigation">${mobileDockItems().map(([id,symbol,label])=>`<button data-action="nav" data-id="${id}" ${page===id?'aria-current="page"':''}><span aria-hidden="true">${symbol}</span>${id==='progress'&&!state.settings.gamification?'Progress':label}</button>`).join('')}</nav>`;
+  $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 5h21v6H12v3h12v5H12v3h15v6H6z" fill="currentColor"/></svg></span>episuite</div><nav class="nav" aria-label="Main navigation">${navItems.filter(([id]) => id !== 'rewards' || state.settings.gamification).map(([id, symbol, title]) => `<button data-action="nav" data-id="${id}" class="${page === id ? 'active' : ''}" ${page === id ? 'aria-current="page"' : ''}><span class="nav-symbol" aria-hidden="true">${symbol}</span>${title}${id === 'tasks' && totalInbox ? `<span class="count">${totalInbox}</span>` : id === 'capture' && state.notes.length ? `<span class="count">${state.notes.length}</span>` : ''}</button>`).join('')}</nav><div class="side-bottom"><div class="side-note"><span class="eyebrow">WORKSPACE SHORTCUTS</span><p><kbd>N</kbd> New task<br><kbd>C</kbd> Capture a thought<br><kbd>F</kbd> Focus</p></div><nav class="nav" aria-label="Preferences"><button data-action="nav" data-id="settings" class="${page === 'settings' ? 'active' : ''}"><span class="nav-symbol" aria-hidden="true">⚙</span>Settings</button></nav></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb">Workspace <span aria-hidden="true">/</span> ${page === 'circles'?'Manage circles':page === 'settings' ? 'Settings' : navItems.find(n => n[0] === page)?.[2]} <span class="status ${online ? '' : 'offline'}"><span class="status-dot"></span>${online ? 'Synced to your server' : 'Offline · capture available'}${pendingCount ? ` · ${pendingCount} pending` : ''}</span></div><div class="top-actions">${state.timer && page !== 'focus' ? btn(`<span data-mini-timer>${timeText(remaining(state.timer))}</span> · ${state.timer.mode === 'focus' ? 'Focus' : 'Break'}`, 'nav', 'focus', 'soft') : ''}${btn('+ Capture <span class="kbd">C</span>', 'quick-capture', '', 'secondary')}${btn('Setup guide','guide-start','','text compact guide-entry')}<button data-action="nav" data-id="settings" class="avatar" aria-label="Open settings">${esc(state.settings.gamification && state.settings.equipped?.badge?.icon || (state.settings.name || 'Y')[0].toUpperCase())}</button>${btn('Settings', 'nav', 'settings', 'text compact mobile-settings')}</div></header><main id="main" class="content" tabindex="-1">${snapshotFailed || captureError ? `<p class="notice warning" role="status">${esc(captureError || 'This browser could not refresh its offline workspace snapshot.')}</p>` : ''}${guidePanel()}${({ circles:()=>circlesPage(state), life:()=>lifePage(state,today(),{...lifeUI.view(),celebration:shouldIgnite()}), now: nowPage, tasks: tasksPage, plan: planPage, social: () => socialPage(state,today(),{circle:socialCircle,query:socialQuery}), focus: focusPage, capture: capturePage, progress: progressPage, rewards: rewardsPage, settings: settingsPage })[page]()}</main></div></div><nav class="phone-dock" aria-label="Quick phone navigation">${mobileDockItems().map(([id,symbol,label])=>`<button data-action="nav" data-id="${id}" ${page===id?'aria-current="page"':''}><span aria-hidden="true">${symbol}</span>${id==='progress'&&!state.settings.gamification?'Progress':label}</button>`).join('')}</nav>`;
   applyCalmLayout(page,$('#main'),state);
   if ($('#sound-select')) $('#sound-select').value = soundKind;
   mountVideo();
   prepareLifeGraphs();
   updateTimer();
+  if (restoreFocus) {
+    const replacement = Array.from($('#app').querySelectorAll('button[data-action]')).find(button =>
+      button.dataset.action === restoreFocus.action && button.dataset.id === restoreFocus.id && button.dataset.step === restoreFocus.step);
+    (replacement || $('#main')).focus({ preventScroll: true });
+  }
 }
 async function videoStore(value) {
   return new Promise((resolve, reject) => {
@@ -197,14 +276,27 @@ function growthPanel(){
   return `<section class="growth-panel"><div class="growth-art" aria-hidden="true"><svg viewBox="0 0 200 200">${leaves}<circle cx="100" cy="100" r="22" fill="#20232d"/><circle cx="100" cy="100" r="9" fill="#d2ed88"/></svg></div><div><span class="eyebrow">YOUR GROWTH · LEVEL ${p.level}</span><h2>${names[Math.min(5,p.level-1)]}</h2><p>${p.xp} growth points from real work. One focus minute = one point; one useful check-off = ten.</p><progress value="${p.into}" max="${p.needed}" aria-label="Growth toward next level"></progress><p class="small">${p.left} points to level ${p.level+1}. Progress stays when you take a day off.</p></div></section>`;
 }
 function taskFlame(t){
+ if (state.settings.showStreaks === false) return '';
  const {current,active}=taskStreak(t,today());
  const scheduled=t.repeat==='weekly'||(t.repeat?.startsWith('interval_')&&Number(t.repeat.slice(9))>1);
  const label=`${current} ${scheduled?'scheduled check-offs':`day${current===1?'':'s'}`} in a row with a check-off${active?' · recorded today':' · not yet today'}`;
  return `<span class="task-streak ${active?'is-lit':'is-dormant'}" data-streak="${current}" data-active="${active}" role="img" aria-label="${esc(label)}" title="${esc(label)}"><svg viewBox="0 0 24 30" aria-hidden="true"><path d="M13 1c1 6-3 8-5 12-1 2-1 3-1 4-2-1-3-3-3-5-5 6-4 12 1 15 4 3 11 3 15-1 5-5 3-12-2-17 0 4-1 5-3 6 1-5 0-10-2-14Z" fill="currentColor"/><path d="M12 16c0 3-3 5-3 8 0 4 6 5 7 1 1-3-2-6-2-7 0 2-1 3-2 3 1-2 0-4 0-5Z" fill="#ffe1a0"/></svg><span>${current}</span></span>`;
 }
+function habitTools(task) {
+  if (task.repeat === 'none' || task.deleted) return '';
+  const rest = habitRestCount(task, today());
+  const days = Object.keys(task.history || {}).filter(day => day < today() && countToday(task, day)).sort();
+  const recovering = days.length && days.at(-1) < addDays(today(), -1) && isDue(task, today());
+  return `<div class="habit-actions">${task.habitPlan?.cue ? `<p class="small">After ${esc(task.habitPlan.cue)}</p>` : ''}
+    ${task.habitPlan?.minimum ? `<p class="small">Minimum · ${esc(task.habitPlan.minimum)}</p>` : ''}
+    ${task.habitPlan?.obstacle ? `<p class="small">${esc(task.habitPlan.obstacle)}</p>` : ''}
+    <div class="row wrap">${isDue(task,today()) ? btn(task.habitPlan?.minimum ? 'Log minimum version' : 'Log habit', 'habit-minimum', task.id, 'text compact') + btn('Plan rest for this opportunity', 'habit-rest', task.id, 'text compact') : ''}
+    ${rest ? btn('Undo planned rest', 'habit-undo-rest', task.id, 'text compact') : ''}
+    ${recovering ? btn('Start small today', 'habit-restart', task.id, 'text compact') : ''}</div></div>`;
+}
 function taskRow(t, number = false) {
   const completed = done(t, today()), eligibleAt=nextEligibleAt(t,today()), waiting=eligibleAt&&eligibleAt>Date.now();
-  return `<div class="task-row ${completed ? 'completed' : ''}">${number ? `<span class="task-number">${String(number).padStart(2, '0')}</span>` : ''}<button class="checkbox ${completed ? 'checked' : ''}" data-action="complete" data-id="${esc(t.id)}" aria-label="${completed ? 'Undo completion of' : 'Complete'} ${esc(t.title)}" aria-pressed="${completed}">${completed ? '✓' : ''}</button><div class="task-content"><div class="task-title-line"><button class="task-title" data-action="edit-task" data-id="${esc(t.id)}">${esc(t.title)}</button>${taskFlame(t)}</div><div class="task-meta"><span>${esc(t.category)}</span><span>·</span><span>${t.minutes} min</span>${t.repeat !== 'none' ? `<span>· ${t.repeat==='interval_0.5'?'Twice a day':esc(t.repeat.replace('interval_', 'Every '))}${t.repeat.startsWith('interval_')&&t.repeat!=='interval_0.5'?' days':''}${t.target > 1 ? ` · ${countToday(t, today())}/${t.target}` : ''}</span>` : ''}${waiting?`<span class="habit-waiting">Later today · available after ${new Intl.DateTimeFormat('en',{timeZone:state.settings.timezone,hour:'numeric',minute:'2-digit'}).format(new Date(eligibleAt))}</span>`:''}${t.personIds?.length?peopleChips(state,t.personIds):''}${t.due ? `<span>· ${t.due < today() ? 'Was due ' : 'Due '}${esc(t.due)}</span>` : ''}${t.steps.length ? `<span>· ${t.steps.filter(s => s.done).length}/${t.steps.length} steps</span>` : ''}</div></div><div class="task-tools">${!completed ? btn(t.lane === 'today' ? 'Focus' : 'Today +', t.lane === 'today' ? 'focus-task' : 'today-task', t.id, 'text compact') : ''}${!completed&&countToday(t,today())>0?btn('Undo last','undo-habit',t.id,'text compact'):''}${t.lane==='today'&&!completed?btn('Remove from today','unselect-task',t.id,'text compact'):''}${btn('History','task-history',t.id,'text compact')}${btn('↕', 'reorder', t.id, 'text compact reorder', 'aria-label="Reorder task"')}${btn('⋯', 'edit-task', t.id, 'text compact', `aria-label="Edit ${esc(t.title)}"`)}</div></div>`;
+  return `<div class="task-row ${completed ? 'completed' : ''}">${number ? `<span class="task-number">${String(number).padStart(2, '0')}</span>` : ''}<button class="checkbox ${completed ? 'checked' : ''}" data-action="complete" data-id="${esc(t.id)}" aria-label="${completed ? 'Undo completion of' : 'Complete'} ${esc(t.title)}" aria-pressed="${completed}">${completed ? '✓' : ''}</button><div class="task-content"><div class="task-title-line"><button class="task-title" data-action="edit-task" data-id="${esc(t.id)}">${esc(t.title)}</button>${taskFlame(t)}</div><div class="task-meta"><span>${esc(t.category)}</span><span>·</span><span>${t.minutes} min</span>${t.repeat !== 'none' ? `<span>· ${t.repeat==='interval_0.5'?'Twice a day':esc(t.repeat.replace('interval_', 'Every '))}${t.repeat.startsWith('interval_')&&t.repeat!=='interval_0.5'?' days':''}${t.target > 1 ? ` · ${countToday(t, today())}/${t.target}` : ''}</span>` : ''}${waiting?`<span class="habit-waiting">Later today · available after ${new Intl.DateTimeFormat('en',{timeZone:state.settings.timezone,hour:'numeric',minute:'2-digit'}).format(new Date(eligibleAt))}</span>`:''}${t.personIds?.length?peopleChips(state,t.personIds):''}${t.due ? `<span>· ${t.due < today() ? 'Was due ' : 'Due '}${esc(t.due)}</span>` : ''}${t.steps.length ? `<span>· ${t.steps.filter(s => s.done).length}/${t.steps.length} steps</span>` : ''}</div>${habitTools(t)}</div><div class="task-tools">${!completed ? btn(t.lane === 'today' ? 'Focus' : 'Today +', t.lane === 'today' ? 'focus-task' : 'today-task', t.id, 'text compact') : ''}${!completed&&countToday(t,today())>0?btn('Undo last','undo-habit',t.id,'text compact'):''}${t.lane==='today'&&!completed?btn('Remove from today','unselect-task',t.id,'text compact'):''}${btn('History','task-history',t.id,'text compact')}${btn('↕', 'reorder', t.id, 'text compact reorder', 'aria-label="Reorder task"')}${btn('⋯', 'edit-task', t.id, 'text compact', `aria-label="Edit ${esc(t.title)}"`)}</div></div>`;
 }
 function timerModes() { return `<div class="timer-modes" aria-label="Timer mode">${[['focus', 'Focus'], ['short', 'Short break'], ['long', 'Long break']].map(([id, name]) => `<button data-action="timer-mode" data-id="${id}" class="${timerMode === id ? 'active' : ''}" aria-pressed="${timerMode === id}" ${state.timer ? 'disabled' : ''}>${name}</button>`).join('')}</div>`; }
 function durations() { return `<div class="duration" aria-label="Session length">${(timerMode === 'focus' ? [2, 10, 25, 45] : [2, 5, 10, 15]).map(n => `<button data-action="duration" data-id="${n}" class="${duration === n ? 'active' : ''}" aria-pressed="${duration === n}" ${state.timer ? 'disabled' : ''}>${n} min</button>`).join('')}</div>`; }
@@ -224,10 +316,11 @@ function sparkPanel(){
   const [title,text]=contextualSpark(state,today(),energy);
   return `<section class="daily-spark"><span class="spark-symbol" aria-hidden="true">✳</span><div><span class="eyebrow">TODAY’S STARTER · ONE IDEA, THEN GO</span><h3>${esc(title)}</h3><p>${esc(text)}</p></div></section>`;
 }
-function nowPage() {return baseNowPage()+socialNow(state,today());}
+function nowPage() {return baseNowPage()+(!state.settings.quietFocus ? socialNow(state,today()) : '');}
 function baseNowPage() {
   const active=state.timer;
   const t = active?.mode==='focus' ? taskById(active.taskId)||next() : next(), m = metrics(state, today());
+  const nextAction = t?.nextAction || t?.habitPlan?.minimum;
   const shortlist = state.tasks.filter(t => !t.deleted && t.lane === 'today' && (isDue(t, today()) || countToday(t, today()) > 0)).sort((a, b) => a.order - b.order);
   const first = t?.steps.find(s => !s.done), completed = shortlist.filter(t => done(t, today())).length;
   const cleared = !t && shortlist.length > 0 && completed === shortlist.length;
@@ -237,12 +330,12 @@ function baseNowPage() {
     <section class="focus-card" aria-label="Next action">
       <div class="focus-label"><span class="action-index">${cleared ? '✓' : '01'}</span><span>${active ? 'YOUR SAVED SESSION' : t ? 'NEXT ACTION' : cleared ? 'YOU FOLLOWED THROUGH' : 'MAKE A START'}</span><span class="focus-signal">ONE THING AT A TIME</span></div>
       <h2>${active && active.mode!=='focus' ? 'Space to<br>recharge.' : t ? esc(t.title) : active ? 'Your focus<br>is saved.' : cleared ? 'Shortlist<br>complete.' : waitingTask ? 'A little<br>space.' : 'Start with<br>one thing.'}</h2>
-      ${active ? `<p class="hero-description">${active.mode==='focus'?'Your session follows you between devices. Your place is kept.':'A break is underway. Look away, stretch, or get water.'}</p><div class="actions row wrap">${btn(active.mode==='focus'?'Return to my session →':'Return to my break →','nav','focus','primary')}</div>` : t ? `<div class="task-meta"><span>${esc(t.category)}</span><span>${t.minutes} MIN ESTIMATE</span><span>${esc(t.energy)} energy</span></div><div class="first-step"><span>YOUR FIRST MOVE</span>${first ? `<button class="step-start" data-action="step" data-id="${esc(t.id)}" data-step="${esc(first.id)}" aria-label="Complete step ${esc(first.title)}"><span aria-hidden="true">○</span>${esc(first.title)}</button>` : 'Choose one action you can do in the next two minutes.'}</div><div class="actions row wrap">${btn('Start 2-minute burst →', 'burst', t.id, 'primary')}${btn('Make it smaller', 'breakdown', t.id, 'text')}${btn('✓ Done', 'complete', t.id, 'text')}${btn('Choose another move','picker','','text')}</div>` : cleared ? `<p class="hero-description">You finished what you chose for today. Take a break, or leave it here.</p><div class="actions row wrap">${btn('Take a break →', 'break-space', '', 'primary')}${btn('Close the day', 'end-day', '', 'text')}</div>` : `<p class="hero-description">${waitingTask?`${esc(waitingTask.title)} is saved for later today. You don’t need to repeat it right now.`:'Add what you want to do. We’ll keep the next step in view.'}</p><div class="actions row wrap">${btn('+ Add one thing', 'new-task', '', 'primary')}${btn('Pick something for me →', 'picker', '', 'text')}</div>`}
+      ${active ? `<p class="hero-description">${active.mode==='focus'?'Your session follows you between devices. Your place is kept.':'A break is underway. Look away, stretch, or get water.'}</p><div class="actions row wrap">${btn(active.mode==='focus'?'Return to my session →':'Return to my break →','nav','focus','primary')}</div>` : t ? `<div class="task-meta"><span>${esc(t.category)}</span><span>${t.minutes} MIN ESTIMATE</span><span>${esc(t.energy)} energy</span></div><div class="first-step"><span>YOUR FIRST MOVE</span>${nextAction ? esc(nextAction) : first ? `<button class="step-start" data-action="step" data-id="${esc(t.id)}" data-step="${esc(first.id)}" aria-label="Complete step ${esc(first.title)}"><span aria-hidden="true">○</span>${esc(first.title)}</button>` : 'Choose one action you can do in the next two minutes.'}</div>${t.habitPlan?.cue ? `<p class="small">Cue · ${esc(t.habitPlan.cue)}</p>` : ''}<div class="actions row wrap">${btn('Start 2-minute burst →', 'burst', t.id, 'primary')}${btn('Make it smaller', 'breakdown', t.id, 'text')}${btn('✓ Done', 'complete', t.id, 'text')}${btn('Choose another move','picker','','text')}</div>` : cleared ? `<p class="hero-description">You finished what you chose for today. Take a break, or leave it here.</p><div class="actions row wrap">${btn('Take a break →', 'break-space', '', 'primary')}${btn('Close the day', 'end-day', '', 'text')}</div>` : `<p class="hero-description">${waitingTask?`${esc(waitingTask.title)} is saved for later today. You don’t need to repeat it right now.`:'Add what you want to do. We’ll keep the next step in view.'}</p><div class="actions row wrap">${btn('+ Add one thing', 'new-task', '', 'primary')}${btn('Pick something for me →', 'picker', '', 'text')}</div>`}
     </section>
     <section class="timer-panel" aria-label="Focus timer"><div class="timer-heading"><span class="eyebrow">${(state.timer?.mode || timerMode) === 'focus' ? 'FOCUS SESSION' : 'BREAK SESSION'}</span><span class="timer-dot" aria-hidden="true"></span></div>${timerModes()}<div class="timer-time" data-timer>${timeText(state.timer ? remaining(state.timer) : duration * 60)}</div><p class="small">${state.timer ? (state.timer.status === 'paused' ? 'Paused. Resume when you’re ready.' : state.timer.mode === 'focus' ? 'Your only job: stay with this task.' : 'Get up. Stretch. Look away.') : timerMode === 'focus' ? 'Two minutes is a valid start.' : 'Get up. Stretch. Look away.'}</p>${state.timer ? timerControls() : durations() + timerControls()}${btn('Open focus space ↗', 'nav', 'focus', 'text compact')}</section>
   </div>
-  ${returnCue()}${momentumPanel()}<section class="daily-strip" aria-label="Today’s progress"><div><span class="eyebrow">TODAY, SO FAR</span><strong>${m.completed} <span>${m.completed === 1 ? 'task completed' : 'tasks completed'}</span></strong></div><div class="shortlist-progress"><div class="progress-segments" aria-hidden="true">${Array.from({length:3}, (_,i) => `<span class="${i < completed ? 'complete' : i < shortlist.length ? 'planned' : ''}"></span>`).join('')}</div><span>${completed} of ${shortlist.length} shortlist tasks done</span></div><div class="focus-total"><strong>${m.focus}<span> min</span></strong><span>focus today</span></div></section>
-  ${sparkPanel()}<div class="section-title row spread"><h2>Your shortlist <span class="pill">${shortlist.filter(t => !done(t, today())).length} / 3 open</span></h2>${btn('+ Choose a task', 'nav', 'tasks', 'text compact')}</div>
+  ${priorityPanel(state,today())}${state.settings.quietFocus ? '' : returnCue()+momentumPanel()}<section class="daily-strip" aria-label="Today’s progress"><div><span class="eyebrow">TODAY, SO FAR</span><strong>${m.completed} <span>${m.completed === 1 ? 'task completed' : 'tasks completed'}</span></strong></div><div class="shortlist-progress"><div class="progress-segments" aria-hidden="true">${Array.from({length:3}, (_,i) => `<span class="${i < completed ? 'complete' : i < shortlist.length ? 'planned' : ''}"></span>`).join('')}</div><span>${completed} of ${shortlist.length} shortlist tasks done</span></div><div class="focus-total"><strong>${m.focus}<span> min</span></strong><span>focus today</span></div></section>
+  ${state.settings.quietFocus ? '' : sparkPanel()}<div class="section-title row spread"><h2>Your shortlist <span class="pill">${shortlist.filter(t => !done(t, today())).length} / 3 open</span></h2>${btn('+ Choose a task', 'nav', 'tasks', 'text compact')}</div>
   <section class="task-list">${shortlist.length ? shortlist.map((t, i) => taskRow(t, i + 1)).join('') : `<div class="empty shortlist-empty"><span class="empty-symbol" aria-hidden="true">+</span><div><h3>Keep today small.</h3><p>Choose up to three tasks. Everything else stays in All tasks.</p></div>${btn('Choose your first task →', 'nav', 'tasks', 'secondary')}</div>`}</section>
   <div class="support-grid"><section class="support"><div class="row spread"><h3>Thought parking</h3><span class="kbd">C</span></div><p>Catch the thought. Keep your place.</p><form data-form="capture-inline" class="capture-bar"><input name="text" aria-label="Capture a thought" placeholder="What just popped into your head?" required maxlength="3000">${btn('Save →', 'submit', '', 'soft', 'type="submit" aria-label="Save thought"')}</form></section><section class="support restart-panel"><span class="eyebrow">A FRESH START</span><h3>Lost your thread?</h3><p>Restart with a two-minute session.</p><div class="row wrap">${btn('Help me restart →', 'restart', '', 'secondary')}${btn('Close the day', 'end-day', '', 'text compact')}</div></section></div>`;
 }
@@ -264,7 +357,7 @@ function sessionReceipt(){
   if(state.timer)return '';
   const session=state.sessions.filter(s=>s.mode==='focus'&&s.minutes>0&&s.date===today()).at(-1);if(!session)return '';
   const choice=(state.feelings||[]).find(f=>f.sessionId===session.id)?.feeling;
-  return `<section class="session-receipt"><span class="eyebrow">YOUR LAST FOCUS · SAVED</span><h3>${session.minutes} minute${session.minutes===1?'':'s'} invested.</h3><p>${esc(taskById(session.taskId)?.title||'Focused time')}${state.settings.gamification?` · +${`${session.coins} coins${session.multiplier>1?' · '+session.multiplier+'× boost':''}`}`:''}</p><div class="row wrap">${canLeaveRunway(session.taskId)?btn('Leave a next move','leave-runway',session.taskId,'secondary compact'):''}${btn('See my progress','nav','progress','text compact')}</div><p class="small">How did this experience feel? (optional)</p><div class="feeling-buttons">${[['good','Felt good'],['neutral','Neutral'],['quieter','Too much → quieter']].map(([value,label])=>btn(label,'session-feeling',session.id,'text compact',`data-feeling="${value}" aria-pressed="${choice===value}"`)).join('')}</div>${choice?'<p class="small muted">Saved locally. You can change your choice.</p>':''}</section>`;
+  return `<section class="session-receipt"><span class="eyebrow">YOUR LAST FOCUS · SAVED</span><h3>${session.minutes} minute${session.minutes===1?'':'s'} invested.</h3><p>${esc(taskById(session.taskId)?.title||'Focused time')}${state.settings.gamification?` · +${`${session.coins} coins${session.multiplier>1?' · '+session.multiplier+'× boost':''}`}`:''}</p><div class="row wrap">${canLeaveRunway(session.taskId)?btn('Leave a next move','leave-runway',session.taskId,'secondary compact'):''}${btn('See my progress','nav','progress','text compact')}${btn('Log an audio trial','focus-experiment-audio','','text compact')}</div><p class="small">How did this experience feel? (optional)</p><div class="feeling-buttons">${[['good','Felt good'],['neutral','Neutral'],['quieter','Too much → quieter']].map(([value,label])=>btn(label,'session-feeling',session.id,'text compact',`data-feeling="${value}" aria-pressed="${choice===value}"`)).join('')}</div>${choice?'<p class="small muted">Saved locally. You can change your choice.</p>':''}</section>`;
 }
 function sessionRunway(){
   if(!state.timer||state.timer.mode!=='focus')return '';
@@ -274,12 +367,20 @@ function focusPage() {
   const focusId = state.timer ? state.timer.taskId : selectedTask === undefined ? next()?.id : selectedTask;
   const t = taskById(focusId);
   const first = t?.steps.find(s => !s.done), m = metrics(state, today()), resting = (state.timer?.mode || timerMode) !== 'focus';
-  return heading(resting ? 'Time for a break.' : 'Focus on one thing.', resting ? 'Step away from the screen. Come back when you’re ready.' : 'Keep the next step in sight.', btn(zen ? 'Show workspace' : 'Quiet view', 'zen', '', 'secondary')) + `<div class="focus-layout"><section class="focus-stage">${timerModes()}<h2>${resting ? 'Rest is part of the rhythm.' : t ? esc(t.title) : 'You can start without a task.'}</h2><p class="small">${resting ? 'Stretch, get water, give your eyes a rest.' : 'Make a little progress. It doesn’t need to be perfect.'}</p><div class="timer-time" data-timer style="font-family:var(--timer-font)">${timeText(state.timer ? remaining(state.timer) : duration * 60)}</div>${sessionRunway()}${!state.timer ? durations() : `<p class="small" data-end-time></p>`}<div class="row">${timerControls()}</div>${!state.timer && !resting ? `<div class="focus-task-select"><label for="focus-task-select">What am I working on?</label><select id="focus-task-select"><option value="" ${selectedTask === null ? 'selected' : ''}>Unassigned focus</option>${state.tasks.filter(t => !t.deleted && isDue(t, today())).map(t => `<option value="${esc(t.id)}" ${t.id === (selectedTask === undefined ? next()?.id : selectedTask) ? 'selected' : ''}>${esc(t.title)}</option>`).join('')}</select></div>` : ''}${first && !resting ? `<div class="first-step row"><button class="checkbox" data-action="step" data-id="${esc(t.id)}" data-step="${esc(first.id)}" aria-label="Complete step ${esc(first.title)}"></button><span>${esc(first.title)}</span></div>` : ''}${t && !resting && !done(t, today()) ? btn('✓ Mark task done', 'complete', t.id, 'text') : ''}<details class="focus-options"><summary>Optional sound</summary><div class="sound-controls row"><label for="sound-select" class="small muted">Soundscape</label><select id="sound-select"><option value="off">Off</option><option value="brown">Brown noise</option><option value="rain">Soft rain</option><option value="white">White noise</option></select><input id="sound-volume" type="range" min="0" max="1" step="0.05" value="${state.settings.volume}" aria-label="Soundscape volume"></div></details>${state.settings.gamification && state.settings.equipped?.title ? `<p class="pill">${esc(state.settings.equipped.title.data.title)}</p>` : ''}<p class="small muted">${m.sessions} focus ${m.sessions === 1 ? 'session' : 'sessions'} today · ${m.focus} minutes that count</p>${btn('Fullscreen ↗', 'fullscreen', '', 'text compact')}</section><form class="capture-bar" data-form="capture-inline" style="margin-top:20px"><span aria-hidden="true">⌑</span><input name="text" placeholder="Distracting thought? Park it here…" aria-label="Park a distracting thought" required maxlength="3000">${btn('Park it', 'submit', '', 'soft', 'type="submit"')}</form><p class="footer-note">Pausing is allowed. Partial focus earns credit. Breaks are always free.</p>${sessionReceipt()}</div>`;
+  return heading(resting ? 'Time for a break.' : 'Focus on one thing.', resting ? 'Step away from the screen. Come back when you’re ready.' : 'Keep the next step in sight.', btn(zen ? 'Show workspace' : 'Quiet view', 'zen', '', 'secondary')) + `<div class="focus-layout"><section class="focus-stage">${timerModes()}<h2>${resting ? 'Rest is part of the rhythm.' : t ? esc(t.title) : 'You can start without a task.'}</h2><p class="small">${resting ? 'Stretch, get water, give your eyes a rest.' : 'Make a little progress. It doesn’t need to be perfect.'}</p><div class="timer-time" data-timer style="font-family:var(--timer-font)">${timeText(state.timer ? remaining(state.timer) : duration * 60)}</div>${sessionRunway()}${!resting ? focusTools({active: Boolean(state.timer), task: canLeaveRunway(focusId) ? t : null, quiet: state.settings.quietFocus}) : ''}${!state.timer ? durations() : `<p class="small" data-end-time></p>`}<div class="row">${timerControls()}</div>${!state.timer && !resting ? `<div class="focus-task-select"><label for="focus-task-select">What am I working on?</label><select id="focus-task-select"><option value="" ${selectedTask === null ? 'selected' : ''}>Unassigned focus</option>${state.tasks.filter(t => !t.deleted && isDue(t, today())).map(t => `<option value="${esc(t.id)}" ${t.id === (selectedTask === undefined ? next()?.id : selectedTask) ? 'selected' : ''}>${esc(t.title)}</option>`).join('')}</select></div>` : ''}${(t?.nextAction || t?.habitPlan?.minimum) && !resting ? `<p class="first-step">${esc(t.nextAction || t.habitPlan.minimum)}</p>` : first && !resting ? `<div class="first-step row"><button class="checkbox" data-action="step" data-id="${esc(t.id)}" data-step="${esc(first.id)}" aria-label="Complete step ${esc(first.title)}"></button><span>${esc(first.title)}</span></div>` : ''}${t && !resting && !done(t, today()) ? btn('✓ Mark task done', 'complete', t.id, 'text') : ''}<details class="focus-options"><summary>Optional sound</summary><div class="sound-controls row"><label for="sound-select" class="small muted">Soundscape</label><select id="sound-select"><option value="off">Off</option><option value="brown">Brown noise</option><option value="rain">Soft rain</option><option value="white">White noise</option></select><input id="sound-volume" type="range" min="0" max="1" step="0.05" value="${state.settings.volume}" aria-label="Soundscape volume"></div></details>${state.settings.gamification && state.settings.equipped?.title ? `<p class="pill">${esc(state.settings.equipped.title.data.title)}</p>` : ''}<p class="small muted">${m.sessions} focus ${m.sessions === 1 ? 'session' : 'sessions'} today · ${m.focus} minutes that count</p>${btn('Fullscreen ↗', 'fullscreen', '', 'text compact')}</section><form class="capture-bar" data-form="capture-inline" style="margin-top:20px"><span aria-hidden="true">⌑</span><input name="text" placeholder="Distracting thought? Park it here…" aria-label="Park a distracting thought" required maxlength="3000">${btn('Park it', 'submit', '', 'soft', 'type="submit"')}</form><p class="footer-note">Pausing is allowed. Partial focus earns credit. Breaks are always free.</p>${sessionReceipt()}</div>`;
 }
 function capturePage() {
   return heading('Thought parking.', 'Catch ideas and reminders. Organize them later.') + `<form data-form="capture-page" class="stack" style="margin-bottom:28px"><label for="capture-text">What do you want to remember?</label><textarea id="capture-text" name="text" placeholder="Write it here. You don’t have to organize it yet." required maxlength="3000"></textarea><div>${btn('+ Save thought', 'submit', '', 'primary', 'type="submit"')}</div></form>${state.notes.length ? state.notes.map(n => `<article class="note-row"><p>${esc(n.text)}</p><div class="row spread"><span class="small muted">${esc(friendlyDate(dateKey(n.created, state.settings.timezone)))}</span><div class="row">${btn('Make a task', 'note-task', n.id, 'soft compact')}${btn('Remove', 'note-delete', n.id, 'text compact')}</div></div></article>`).join('') : `<div class="empty"><h3>Nothing to hold onto right now.</h3><p>Use “Capture” from anywhere, or press C. You can decide what to do with a thought later.</p></div>`}`;
 }
-function progressPage() {return baseProgressPage()+socialProgress(state,today());}
+function progressPage() {
+  const review = state.weeklyReviews?.[weekStart(today())];
+  const previous = Object.entries(state.weeklyReviews || {}).filter(([week]) => week < weekStart(today())).sort(([a], [b]) => b.localeCompare(a)).slice(0, 6);
+  return `<section class="settings-panel productivity-panel"><h2>Weekly review</h2>
+    ${review ? `<dl><dt>Outcome</dt><dd>${esc(review.outcome) || '–'}</dd><dt>Friction</dt><dd>${esc(review.friction) || '–'}</dd><dt>Next adjustment</dt><dd>${esc(review.adjustment) || '–'}</dd></dl>` : '<p>Note what moved forward and one change to try next week.</p>'}
+    <div class="row wrap">${btn(review ? 'Edit weekly review' : 'Write this week’s review', 'weekly-review', '', 'secondary compact')}${btn('Private focus experiments', 'focus-experiments', '', 'text compact')}</div>
+    ${previous.length ? `<details><summary>Previous weekly reviews</summary>${previous.map(([week, entry]) => `<article class="note-row"><h3>Week of ${week}</h3><p>${esc(entry.outcome)}</p><p class="small">${esc(entry.friction)}</p><p class="small">${esc(entry.adjustment)}</p></article>`).join('')}</details>` : ''}
+  </section>` + baseProgressPage() + socialProgress(state,today());
+}
 function baseProgressPage() {
   const feedback = Object.entries(state.blockFeedback || {}).filter(([key]) => key.startsWith(today() + ':')).map(([, value]) => value);
   const m = metrics(state, today()), days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6)), values = days.map(d => metrics(state, d).focus), max = Math.max(30, ...values);
@@ -298,18 +399,21 @@ function rewardSettings(){
 function phoneSettings(){
   const n=state.notifications||{},c=n.config||{},jobs=n.jobs||[],last=jobs.at(-1);
   const toggle=(key,label)=>`<div class="switch-row"><input type="checkbox" id="phone-${key}" name="${key}" ${c[key]?'checked':''}><label for="phone-${key}">${label}</label></div>`;
-  return `<section class="settings-panel"><h2>Phone notifications</h2><p class="small">Delivered by your Episuite server while the browser is closed. Keep the server running.</p><form data-form="phone">${toggle('enabled','Enable phone delivery')}${select('Delivery service','provider',[['ntfy','ntfy (your home server)'],['telegram','Telegram bot']],c.provider||'ntfy')}${field('ntfy server URL','ntfyUrl',c.ntfyUrl||'','url','placeholder="https://ntfy.example.com"')}${field('ntfy topic','topic',c.topic||'','text','autocomplete="off"')}${field('ntfy access token (optional)','ntfyToken','','password',`autocomplete="new-password" placeholder="${c.ntfyConfigured?'Saved; leave blank to keep':''}"`)}${toggle('clearNtfyToken','Remove saved ntfy token')}${field('Telegram bot token','botToken','','password',`autocomplete="new-password" placeholder="${c.botConfigured?'Saved; leave blank to keep':''}"`)}${toggle('clearBotToken','Remove saved Telegram token')}${field('Telegram chat ID','chatId',c.chatId||'')}<p class="small">ntfy: subscribe to the same server and topic in your phone’s ntfy app. Telegram: create a bot with @BotFather, message it /start, then obtain your numeric chat ID from the bot’s getUpdates response.</p>${toggle('boosts','Rare task payout alerts')}${toggle('reminders','Calendar reminders')}${toggle('timers','Focus and break completion')}<div class="row wrap">${btn('Save phone connection','submit','','secondary','type="submit"')}${btn('Send test notification','phone-test','','soft',c.enabled?'':'disabled')}</div></form><p class="small muted">Tokens stay on your server and are excluded from exports. Save before testing. Use a private ntfy topic or access controls.</p><p class="small" role="status">${esc(n.lastError|| (last?'Latest delivery: '+last.status:'No notifications sent yet.'))}</p></section>`;
+  return `<section class="settings-panel"><h2>Phone notifications</h2><p class="small">Delivered by your Episuite server while the browser is closed. Keep the server running.</p><form data-form="phone">${toggle('enabled','Enable phone delivery')}${select('Delivery service','provider',[['ntfy','ntfy (your home server)'],['telegram','Telegram bot']],c.provider||'ntfy')}${field('ntfy server URL','ntfyUrl',c.ntfyUrl||'','url','placeholder="https://ntfy.example.com"')}${field('ntfy topic','topic',c.topic||'','text','autocomplete="off"')}${field('ntfy access token (optional)','ntfyToken','','password',`autocomplete="new-password" placeholder="${c.ntfyConfigured?'Saved; leave blank to keep':''}"`)}${toggle('clearNtfyToken','Remove saved ntfy token')}${field('Telegram bot token','botToken','','password',`autocomplete="new-password" placeholder="${c.botConfigured?'Saved; leave blank to keep':''}"`)}${toggle('clearBotToken','Remove saved Telegram token')}${field('Telegram chat ID','chatId',c.chatId||'')}<p class="small">ntfy: subscribe to the same server and topic in your phone’s ntfy app. Telegram: create a bot with @BotFather, message it /start, then obtain your numeric chat ID from the bot’s getUpdates response.</p><details><summary>What gets sent to this provider?</summary><ul><li>Calendar reminders: event title, start time, and location if saved.</li><li>Rare rewards: task title and coin amount.</li><li>Timer completion: elapsed minutes and any coins earned.</li></ul></details>${toggle('boosts','Rare task payout alerts')}${toggle('reminders','Calendar reminders')}${toggle('timers','Focus and break completion')}<div class="row wrap">${btn('Save phone connection','submit','','secondary','type="submit"')}${btn('Send test notification','phone-test','','soft',c.enabled?'':'disabled')}</div></form><p class="small muted">Tokens stay on your server and are excluded from exports. Save before testing. Use a private ntfy topic or access controls.</p><p class="small" role="status">${esc(n.lastError|| (last?'Latest delivery: '+last.status:'No notifications sent yet.'))}</p></section>`;
 }
 function mobileNavigationSettings(){const pages=state.settings.mobilePages||['now','tasks','plan','focus'];return `<section class="settings-panel mobile-navigation-settings"><h2>Mobile navigation</h2><p class="small">Choose the first four pages, in order. More always opens all pages.</p><form data-form="mobile-nav"><div class="form-grid">${pages.map((id,i)=>select(`Position ${i+1}`,'slot'+i,navItems.filter(n=>n[0]!=='rewards'||state.settings.gamification).map(n=>[n[0],n[2]]),id)).join('')}</div>${btn('Save mobile navigation','submit','','secondary','type="submit"')}</form></section>`;}
 function settingsPage() {
   const s = state.settings;
-  return `<section class="settings-panel"><h2>Calendar appearance</h2><p class="small">Today is always highlighted. Choose how elapsed days look.</p><form data-form="calendar-appearance">${select('Past days','calendarPastStyle',[['gray','Gray out past days'],['cross','Draw an X over past days']],s.calendarPastStyle||'gray')}${btn('Save calendar appearance','submit','','secondary','type="submit"')}</form></section>`+mobileNavigationSettings()+heading('Tune your workspace.', 'Adjust the rhythm, the look, and your connections.') + engagementSettings() + rewardSettings() + phoneSettings() + `<section class="guide-settings row spread wrap"><div><h3>Keep your workspace within reach</h3><p class="small">Open the same home-server address on every device. Add it to your phone’s home screen for a quick return.</p></div>${btn('Add to my home screen','install-help','','secondary')}</section>` + `<section class="guide-settings row spread wrap"><div><h3>Learn the daily loop</h3><p class="small">Replay the page-by-page guide. Your tasks and preferences stay intact.</p></div>${btn(state.onboarding?.status==='paused'?'Resume setup guide':state.onboarding?.status==='active'?'Restart setup guide':'Replay setup guide',state.onboarding?.status==='active'?'guide-restart':'guide-start','','secondary')}${state.onboarding?.status==='paused'?btn('Start guide from beginning','guide-restart','','text compact'):''}</section><form data-form="settings"><div class="settings-grid"><section class="settings-panel"><h2>Your space</h2>${field('What should we call you?', 'name', s.name, 'text', 'maxlength="60"')}${select('Appearance', 'theme', [['light', 'Daylight'], ['dark', 'Evening'], ['system', 'Follow my device']], s.theme)}${field('Timezone', 'timezone', s.timezone, 'text', 'required')}${select('Timer typeface', 'timerFont', [['sans', 'Simple'], ['mono', 'Monospace'], ['serif', 'Bookish']], s.timerFont)}${switchField('lowStim', 'Less visual stimulation', 'Quiet surfaces and fewer supporting panels.')}${switchField('reducedMotion', 'Reduce motion', 'Remove interface transitions.')}${switchField('gamification', 'Rewards & gentle goals', 'Show coins and milestones. Turn off whenever you prefer.')}</section><section class="settings-panel"><h2>Your rhythm</h2><div class="form-grid">${field('Focus (minutes)', 'focusMinutes', s.focusMinutes, 'number', 'min="1" max="120" required')}${field('Short break', 'shortBreak', s.shortBreak, 'number', 'min="1" max="120" required')}${field('Long break', 'longBreak', s.longBreak, 'number', 'min="1" max="120" required')}${field('Sessions before long break', 'cycles', s.cycles, 'number', 'min="1" max="8" required')}${field('Full-session threshold (%)', 'partialThreshold', s.partialThreshold, 'number', 'min="50" max="100" required')}${field('Daily session goal', 'dailyGoal', s.dailyGoal, 'number', 'min="1" max="10" required')}</div>${switchField('sound', 'A gentle finish sound', 'A single chime when a timer ends.')}${switchField('autoBreak', 'Start a break after focus', 'Move straight into a short or long break.')}${field('Sound volume', 'volume', s.volume, 'range', 'min="0" max="1" step="0.05"')}<p class="small muted">All completed focus minutes earn credit. The threshold only decides whether a session counts as full.</p></section></div><div class="row" style="margin:22px 0">${btn('Save preferences', 'submit', '', 'primary', 'type="submit"')}<span class="error-text" id="settings-error"></span></div></form><div class="settings-grid"><section class="settings-panel"><h2>Keep your data safe</h2><p class="small" style="margin-bottom:17px">Export an Episuite backup, or import an EpiApps / Epimix backup. Import replaces the matching records and saves a server backup first.</p><div class="row wrap"><a class="btn secondary" href="/api/export" download="episuite-backup.json">Export backup ↓</a>${btn('Import backup', 'import', '', 'secondary')}<input id="import-file" type="file" accept="application/json,.json" hidden></div><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Categories</h3><div class="row wrap" style="margin:15px 0">${state.categories.map(c => `<span class="pill">${esc(c)}${c !== 'Personal' ? `<button data-action="delete-category" data-id="${esc(c)}" aria-label="Remove ${esc(c)}"> ×</button>` : ''}</span>`).join('')}</div><form data-form="category" class="row"><input name="name" aria-label="New category name" placeholder="New category" required maxlength="50">${btn('Add', 'submit', '', 'soft', 'type="submit"')}</form></section><section class="settings-panel"><h2>Calendar connection</h2><p class="small" style="margin-bottom:17px">Export an .ics file from My day, or sync to a CalDAV calendar. Use the full calendar collection URL.</p><form data-form="calendar">${field('Calendar collection URL', 'url', state.calendar.url, 'url')}${field('Username', 'username', state.calendar.username)}${field('Password / app password', 'password', '', 'password', `autocomplete="new-password" placeholder="${state.calendar.configured ? 'Saved; leave blank to keep' : ''}"`)}<div class="row wrap">${btn('Save connection', 'submit', '', 'secondary', 'type="submit"')}${btn('Sync today', 'calendar-sync', '', 'soft')}${btn('Remove synced events', 'calendar-remove', '', 'text compact')}</div></form><p class="small muted" style="margin-top:13px">Credentials stay on your server and are excluded from exports. Live sync needs a reachable CalDAV server.</p></section><section class="settings-panel"><h2>A little help getting started</h2><p class="small" style="margin-bottom:15px">Optional local AI can turn a task into smaller actions. Connect Ollama on your home server (see the Docker setup in the README). Manual steps always work.</p><form data-form="ai-settings">${field('Ollama model', 'ollamaModel', s.ollamaModel)}${btn('Save model', 'submit', '', 'secondary', 'type="submit"')}</form><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Your background</h3><p class="small">A quiet image, if it helps you. JPG, PNG or WebP, up to 1 MB.</p><input id="background-file" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose background image" style="margin:14px 0">${btn('Remove background', 'remove-background', '', 'text compact')}<h3 style="margin-top:22px">Optional focus video</h3><p class="small">Muted, behind the focus screen only. Saved on this browser. Up to 30 MB; hidden in low-stimulation or reduced-motion mode.</p><input id="video-file" type="file" accept="video/mp4,video/webm" aria-label="Choose focus background video" style="margin:14px 0">${btn('Remove video', 'remove-video', '', 'text compact')}</section><section class="settings-panel"><h2>Connect your watch</h2><p class="small">The included EpiBlock Zepp app can read your day through <code>/api/v1/day</code>. Point its server setting at this app’s reachable address. See the README for the watch display update and LAN setup.</p><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Using Episuite</h3><p class="small">Press C to capture, N for a task, and F for focus. In the Focus screen, Space pauses or resumes. Quiet view keeps the rest of the workspace out of sight.</p><p class="small" style="margin-top:15px">Episuite supports your workflow. Its ADHD usefulness score is a simulated usability assessment, not a clinical result.</p></section></div>`;
+  return `<section class="settings-panel"><h2>Calendar appearance</h2><p class="small">Today is always highlighted. Choose how elapsed days look.</p><form data-form="calendar-appearance">${select('Past days','calendarPastStyle',[['gray','Gray out past days'],['cross','Draw an X over past days']],s.calendarPastStyle||'gray')}${btn('Save calendar appearance','submit','','secondary','type="submit"')}</form></section>`+mobileNavigationSettings()+heading('Tune your workspace.', 'Adjust the rhythm, the look, and your connections.') + engagementSettings() + rewardSettings() + phoneSettings() + `<section class="guide-settings row spread wrap"><div><h3>Keep your workspace within reach</h3><p class="small">Open the same home-server address on every device. Add it to your phone’s home screen for a quick return.</p></div>${btn('Add to my home screen','install-help','','secondary')}</section>` + `<section class="guide-settings row spread wrap"><div><h3>Learn the daily loop</h3><p class="small">Replay the page-by-page guide. Your tasks and preferences stay intact.</p></div>${btn(state.onboarding?.status==='paused'?'Resume setup guide':state.onboarding?.status==='active'?'Restart setup guide':'Replay setup guide',state.onboarding?.status==='active'?'guide-restart':'guide-start','','secondary')}${state.onboarding?.status==='paused'?btn('Start guide from beginning','guide-restart','','text compact'):''}</section><form data-form="settings"><div class="settings-grid"><section class="settings-panel"><h2>Your space</h2>${field('What should we call you?', 'name', s.name, 'text', 'maxlength="60"')}${select('Appearance', 'theme', [['light', 'Daylight'], ['dark', 'Evening'], ['system', 'Follow my device']], s.theme)}${field('Timezone', 'timezone', s.timezone, 'text', 'required')}${select('Timer typeface', 'timerFont', [['sans', 'Simple'], ['mono', 'Monospace'], ['serif', 'Bookish']], s.timerFont)}${switchField('lowStim', 'Less visual stimulation', 'Quiet surfaces and fewer supporting panels.')}${switchField('reducedMotion', 'Reduce motion', 'Remove interface transitions.')}${switchField('showStreaks', 'Show task streaks', 'Show recent runs of check-offs beside tasks.')}${switchField('disableLetterShortcuts', 'Disable single-letter shortcuts', 'Use buttons instead of C, N and F.')}${switchField('gamification', 'Rewards & gentle goals', 'Show coins and milestones. Turn off whenever you prefer.')}</section><section class="settings-panel"><h2>Your rhythm</h2><div class="form-grid">${field('Focus (minutes)', 'focusMinutes', s.focusMinutes, 'number', 'min="1" max="120" required')}${field('Short break', 'shortBreak', s.shortBreak, 'number', 'min="1" max="120" required')}${field('Long break', 'longBreak', s.longBreak, 'number', 'min="1" max="120" required')}${field('Sessions before long break', 'cycles', s.cycles, 'number', 'min="1" max="8" required')}${field('Full-session threshold (%)', 'partialThreshold', s.partialThreshold, 'number', 'min="50" max="100" required')}${field('Daily session goal', 'dailyGoal', s.dailyGoal, 'number', 'min="1" max="10" required')}</div>${switchField('sound', 'A gentle finish sound', 'A single chime when a timer ends.')}${switchField('quietFocus', 'Quiet focus', 'Keep Today simpler and reduce nonessential focus alerts.')}${switchField('autoBreak', 'Start a break after focus', 'Move straight into a short or long break.')}${field('Sound volume', 'volume', s.volume, 'range', 'min="0" max="1" step="0.05"')}<p class="small muted">All completed focus minutes earn credit. The threshold only decides whether a session counts as full.</p></section></div><div class="row" style="margin:22px 0">${btn('Save preferences', 'submit', '', 'primary', 'type="submit"')}<span class="error-text" id="settings-error"></span></div></form><div class="settings-grid"><section class="settings-panel"><h2>Keep your data safe</h2><p class="small" style="margin-bottom:17px">Export an Episuite backup, or import an EpiApps / Epimix backup. Import replaces the matching records and saves a server backup first.</p><div class="row wrap"><a class="btn secondary" href="/api/export" download="episuite-backup.json">Export backup ↓</a>${btn('Import backup', 'import', '', 'secondary')}<input id="import-file" type="file" accept="application/json,.json" hidden></div><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Categories</h3><div class="row wrap" style="margin:15px 0">${state.categories.map(c => `<span class="pill">${esc(c)}${c !== 'Personal' ? `<button data-action="delete-category" data-id="${esc(c)}" aria-label="Remove ${esc(c)}"> ×</button>` : ''}</span>`).join('')}</div><form data-form="category" class="row"><input name="name" aria-label="New category name" placeholder="New category" required maxlength="50">${btn('Add', 'submit', '', 'soft', 'type="submit"')}</form></section><section class="settings-panel"><h2>Calendar connection</h2><p class="small" style="margin-bottom:17px">Export an .ics file from My day, or sync to a CalDAV calendar. Use the full calendar collection URL.</p><form data-form="calendar">${field('Calendar collection URL', 'url', state.calendar.url, 'url')}${field('Username', 'username', state.calendar.username)}${field('Password / app password', 'password', '', 'password', `autocomplete="new-password" placeholder="${state.calendar.configured ? 'Saved; leave blank to keep' : ''}"`)}<div class="row wrap">${btn('Save connection', 'submit', '', 'secondary', 'type="submit"')}${btn('Sync today', 'calendar-sync', '', 'soft')}${btn('Remove synced events', 'calendar-remove', '', 'text compact')}</div></form><p class="small muted" style="margin-top:13px">Credentials stay on your server and are excluded from exports. Live sync needs a reachable CalDAV server.</p></section><section class="settings-panel"><h2>A little help getting started</h2><p class="small" style="margin-bottom:15px">Optional local AI can turn a task into smaller actions. Connect Ollama on your home server (see the Docker setup in the README). Manual steps always work.</p><form data-form="ai-settings">${field('Ollama model', 'ollamaModel', s.ollamaModel)}${btn('Save model', 'submit', '', 'secondary', 'type="submit"')}</form><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Your background</h3><p class="small">A quiet image, if it helps you. JPG, PNG or WebP, up to 1 MB.</p><input id="background-file" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose background image" style="margin:14px 0">${btn('Remove background', 'remove-background', '', 'text compact')}<h3 style="margin-top:22px">Optional focus video</h3><p class="small">Muted, behind the focus screen only. Saved on this browser. Up to 30 MB; hidden in low-stimulation or reduced-motion mode.</p><input id="video-file" type="file" accept="video/mp4,video/webm" aria-label="Choose focus background video" style="margin:14px 0">${btn('Remove video', 'remove-video', '', 'text compact')}</section><section class="settings-panel"><h2>Connect your watch</h2><p class="small">The included EpiBlock Zepp app can read your day through <code>/api/v1/day</code>. Point its server setting at this app’s reachable address. See the README for the watch display update and LAN setup.</p><hr style="border:0;border-top:1px solid var(--line);margin:22px 0"><h3>Using Episuite</h3><p class="small">Press C to capture, N for a task, and F for focus. You can disable single-letter shortcuts above. In the Focus screen, Space pauses or resumes. Quiet view keeps the rest of the workspace out of sight.</p><p class="small" style="margin-top:15px">Episuite supports your workflow. Its ADHD usefulness score is a simulated usability assessment, not a clinical result.</p></section></div>`;
 }
 function showDialog(title, content, formName = '', submitLabel = 'Save') {
-  delete $('#dialog').dataset.welcome;
-  lastFocus = document.activeElement;
-  $('#dialog').innerHTML = `<div class="dialog-head"><h2>${title}</h2><button data-action="close-dialog" aria-label="Close dialog">×</button></div>${formName ? `<form data-form="${formName}">` : ''}${content}<div class="error-text" id="dialog-error" role="alert"></div>${formName ? `<div class="dialog-foot">${btn('Cancel', 'close-dialog', '', 'text')}${btn(submitLabel, 'submit', '', 'primary', 'type="submit"')}</div></form>` : ''}`;
-  $('#dialog').showModal();
+  const dialog = $('#dialog');
+  delete dialog.dataset.welcome;
+  if (!dialog.open) lastFocus = document.activeElement;
+  dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title"></h2><button data-action="close-dialog" aria-label="Close dialog">×</button></div>${formName ? `<form data-form="${formName}">` : ''}${content}<div class="error-text" id="dialog-error" role="alert"></div>${formName ? `<div class="dialog-foot">${btn('Cancel', 'close-dialog', '', 'text')}${btn(submitLabel, 'submit', '', 'primary', 'type="submit"')}</div></form>` : ''}`;
+  dialog.querySelector('h2').textContent = title;
+  dialog.setAttribute('aria-labelledby', 'dialog-title');
+  if (!dialog.open) dialog.showModal();
   updateOptionalFields();
   setTimeout(() => {const dialog=$('#dialog');(dialog.querySelector('input:not([type=hidden]),textarea,select') || dialog.querySelector('button'))?.focus({preventScroll:true});dialog.scrollTop=0;}, 0);
 }
@@ -322,11 +426,11 @@ window.addEventListener('appinstalled',()=>{installPrompt=null;toast('Episuite i
 function closeDialog() { $('#dialog').close(); lastFocus?.focus(); }
 function taskDialog(id) {
   const t = id ? taskById(id) : { title: '', description: '', category: 'Personal', minutes: 15, energy: 'medium', difficulty: 1, repeat: 'none', target: 1, due: '', lane: page === 'now' ? 'today' : 'inbox', steps: [] };
-  showDialog(id ? 'Make this task work for you' : 'One thing on your mind', `<input type="hidden" name="expectedVersion" value="${t.editVersion||0}"><input type="hidden" name="id" value="${esc(id || '')}">${field('What do you want to do?', 'title', t.title, 'text', 'required maxlength="300"')}<div class="form-grid">${select('Show in today’s selection?', 'lane', [['inbox', 'All tasks'], ['today', 'Select for today · up to three']], t.lane==='later'?'inbox':t.lane)}${field('Roughly how many minutes?', 'minutes', t.minutes, 'number', 'min="1" max="480" required')}</div><details class="task-details"><summary>Categories, habits & tiny steps</summary><div class="form-grid">${select('Category', 'category', state.categories.map(c => [c, c]), t.category)}${select('Energy needed', 'energy', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], t.energy)}${select('How much effort?', 'difficulty', [[1, 'Small · 5 coins'], [2, 'Medium · 10 coins'], [3, 'Big · 20 coins']], t.difficulty)}${field('Due date (optional)', 'due', t.due, 'date')}${select('Repeat', 'repeat', [['none', 'Just once'], ['daily', 'Every day'], ['weekly', 'Every week'], ['interval_0.5', 'Twice a day'], ['interval_3', 'Every 3 days'], ['interval_7', 'Every 7 days'], ['custom', 'Custom interval']], /^(none|daily|weekly|interval_0.5|interval_3|interval_7)$/.test(t.repeat) ? t.repeat : 'custom')}${field('Minimum time between daily repeats (minutes)', 'minimumGapMinutes', t.minimumGapMinutes ?? (t.repeat === 'interval_0.5' ? 360 : 0), 'number', 'min="0" max="1440" required')}${field('Custom interval (days)', 'interval', t.repeat.startsWith('interval_') ? t.repeat.slice(9) : 2, 'number', 'min="0.05" max="365" step="0.05"')}</div><div class="field"><label for="task-description">A note to your future self</label><textarea name="description" id="task-description" maxlength="3000">${esc(t.description)}</textarea></div><div class="field"><label for="task-steps">Tiny steps (one per line)</label><textarea name="steps" id="task-steps" placeholder="Open the document\nWrite the first sentence">${esc(t.steps.map(s => s.title).join('\n'))}</textarea></div></details>${id ? `<div class="row wrap">${btn('Break into small steps', 'ai-steps', id, 'soft compact')}${btn('Delete task', 'delete-task', id, 'text compact danger')}</div>` : ''}`, 'task', id ? 'Save task' : 'Add task');
+  showDialog(id ? 'Make this task work for you' : 'One thing on your mind', `<input type="hidden" name="expectedVersion" value="${t.editVersion||0}"><input type="hidden" name="id" value="${esc(id || '')}">${field('What do you want to do?', 'title', t.title, 'text', 'required maxlength="300"')}<div class="form-grid">${select('Show in today’s selection?', 'lane', [['inbox', 'All tasks'], ['today', 'Select for today · up to three']], t.lane==='later'?'inbox':t.lane)}${field('Roughly how many minutes?', 'minutes', t.minutes, 'number', 'min="1" max="480" required')}</div>${field('Next action (optional)', 'nextAction', t.nextAction, 'text', 'maxlength="240"')}<details class="task-details"><summary>Categories, habits & tiny steps</summary><div class="form-grid">${select('Category', 'category', state.categories.map(c => [c, c]), t.category)}${select('Energy needed', 'energy', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], t.energy)}${select('How much effort?', 'difficulty', [[1, 'Small · 5 coins'], [2, 'Medium · 10 coins'], [3, 'Big · 20 coins']], t.difficulty)}${field('Due date (optional)', 'due', t.due, 'date')}${select('Repeat', 'repeat', [['none', 'Just once'], ['daily', 'Every day'], ['weekly', 'Every week'], ['interval_0.5', 'Twice a day'], ['interval_3', 'Every 3 days'], ['interval_7', 'Every 7 days'], ['custom', 'Custom interval']], /^(none|daily|weekly|interval_0.5|interval_3|interval_7)$/.test(t.repeat) ? t.repeat : 'custom')}${field('Minimum time between daily repeats (minutes)', 'minimumGapMinutes', t.minimumGapMinutes ?? (t.repeat === 'interval_0.5' ? 360 : 0), 'number', 'min="0" max="1440" required')}${field('Custom interval (days)', 'interval', t.repeat.startsWith('interval_') ? t.repeat.slice(9) : 2, 'number', 'min="0.05" max="365" step="0.05"')}</div><fieldset id="habit-plan"><legend>Habit plan (optional)</legend>${field('After this cue…', 'habitCue', t.habitPlan?.cue, 'text', 'maxlength="240"')}${field('Smallest useful version', 'habitMinimum', t.habitPlan?.minimum, 'text', 'maxlength="240"')}${field('If I get stuck, I will…', 'habitObstacle', t.habitPlan?.obstacle, 'text', 'maxlength="240"')}</fieldset><div class="field"><label for="task-description">A note to your future self</label><textarea name="description" id="task-description" maxlength="3000">${esc(t.description)}</textarea></div><div class="field"><label for="task-steps">Tiny steps (one per line)</label><textarea name="steps" id="task-steps" placeholder="Open the document\nWrite the first sentence">${esc(t.steps.map(s => s.title).join('\n'))}</textarea></div></details>${id ? `<div class="row wrap">${btn('Break into small steps', 'ai-steps', id, 'soft compact')}${btn('Delete task', 'delete-task', id, 'text compact danger')}</div>` : ''}`, 'task', id ? 'Save task' : 'Add task');
 }
 function blockDialog(id) {
   const remote=state.blocks.find(b=>b.id===id);
-  if(remote?.caldav?.readOnly)return showDialog(esc(remote.name), `<p>This event comes from your calendar server. Edit recurring, all-day, or long events in your calendar client, then use Sync this range to refresh it.</p><p class="small muted">${esc(remote.description||remote.location||'')}</p>`);
+  if(remote?.caldav?.readOnly)return showDialog(remote.name, `<p>This event comes from your calendar server. Edit recurring, all-day, or long events in your calendar client, then use Sync this range to refresh it.</p><p class="small muted">${esc(remote.description||remote.location||'')}</p>`);
   const b = id ? state.blocks.find(b => b.id === id) : { name: '', date: planDate, mode: 'fixed', start: '09:00', duration: 30, offset: 0, repeat: 'none', taskIds: [], kind: 'focus' };
   if (b.commitment) { showDialog('Edit commitment', commitmentForm(b,planDate)+colorField(b,state.blocks)+peopleSelector(state,b.personIds||[]) + (b.excludedDates?.length ? '<p class="small muted">Skipped: ' + b.excludedDates.map(esc).join(', ') + '</p>' + btn('Restore skipped occurrences','restore-occurrences',b.id,'text compact') : ''), 'commitment', 'Save commitment'); return; }
   showDialog(id ? 'Adjust this time block' : 'Make a little room', `<input type="hidden" name="expectedVersion" value="${b.editVersion||0}"><input type="hidden" name="id" value="${esc(id || '')}">${field('Block name', 'name', b.name, 'text', 'required maxlength="120"')}<div class="form-grid">${field('Date', 'date', b.date, 'date', 'required')}${select('Timing', 'mode', [['fixed', 'Fixed · appointment'], ['relative', 'Flexible · after my day starts']], b.mode)}${field('Fixed start time', 'start', b.start, 'time', 'required')}${field('Minutes after day starts', 'offset', b.offset, 'number', 'min="0" max="1425" step="15"')}${field('Length (minutes)', 'duration', b.duration, 'number', 'min="5" max="480" required')}${select('Repeat', 'repeat', [['none', 'Only this day'], ['daily', 'Every day'], ['weekly', 'Every week']], b.repeat)}${select('Kind', 'kind', [['focus', 'Focus'], ['break', 'Break / transition']], b.kind)}</div>${colorField(b,state.blocks)}${peopleSelector(state,b.personIds||[])}<label>Tasks in this block</label>${state.tasks.filter(t => !t.deleted && !t.completed).map(t => `<div class="switch-row"><input type="checkbox" name="taskIds" id="b-${esc(t.id)}" value="${esc(t.id)}" ${b.taskIds.includes(t.id) ? 'checked' : ''}><label for="b-${esc(t.id)}">${esc(t.title)}</label></div>`).join('') || '<p class="small muted">You can add tasks later.</p>'}`, 'block', 'Save block');
@@ -335,6 +439,7 @@ function blockDialog(id) {
 function updateOptionalFields() {
   const repeat = $('#dialog #f-repeat'), interval = $('#dialog #f-interval');
   if (repeat && interval) interval.closest('.field').hidden = repeat.value !== 'custom';
+  if (repeat && $('#habit-plan')) $('#habit-plan').hidden = repeat.value === 'none';
   const gap=$('#dialog #f-minimumGapMinutes');if(gap&&repeat){const multi=repeat.value==='interval_0.5'||(repeat.value==='custom'&&Number(interval?.value)<1);gap.closest('.field').hidden=!multi;}
   const mode = $('#dialog #f-mode'), start = $('#dialog #f-start'), offset = $('#dialog #f-offset');
   if (mode && start && offset) { start.closest('.field').hidden = mode.value !== 'fixed'; offset.closest('.field').hidden = mode.value !== 'relative'; }
@@ -343,9 +448,9 @@ async function onTimerComplete(timer,priorKeepsakes) {
   timerMode=state.timer?.mode||(timer.mode==='focus'?'short':'focus');duration=state.timer?state.timer.duration/60:timerMode==='focus'?state.settings.focusMinutes:state.settings.shortBreak;
   const saved=state.sessions.find(s=>s.id===timer.id);
   const acknowledged=saved?.mode==='focus'&&saved.minutes>0&&showWin(`${saved.minutes} minute${saved.minutes===1?'':'s'} invested.`,`${taskById(saved.taskId)?.title||'Focused time'} · +${`${saved.coins} coins${saved.multiplier>1?' · '+saved.multiplier+'× boost':''}`}. Your effort is saved.`,priorKeepsakes);
-  chime();
+  if (!state.settings.quietFocus) chime();
   if(!acknowledged)toast(timer.mode === 'focus' ? 'A little progress made. Time for a break.' : 'Break finished. Return when you’re ready.');
-  if ('Notification' in window && Notification.permission === 'granted' && document.hidden) new Notification('Episuite', { body: timer.mode === 'focus' ? 'Your focus session is finished. Make room for a break.' : 'Your break is finished. Return when you’re ready.' });
+  if (!state.settings.quietFocus && 'Notification' in window && Notification.permission === 'granted' && document.hidden) new Notification('Episuite', { body: timer.mode === 'focus' ? 'Your focus session is finished. Make room for a break.' : 'Your break is finished. Return when you’re ready.' });
 }
 function updateTimer() {
   lifeUI.update();
@@ -382,7 +487,9 @@ const litDays=new Set();
 function flameKey(){return `episuite.flame:${state.workspaceId}:${today()}`;}
 function shouldIgnite(){if(!streak(state,today()).active||state.settings.reducedMotion||state.settings.lowStim)return false;try{return !litDays.has(flameKey())&&!localStorage.getItem(flameKey());}catch{return !litDays.has(flameKey());}}
 const lifeUI=lifeTools({getState:()=>state,request,render,showDialog,closeDialog,field,btn,esc,today,timeText,remaining,taskById,action});
+const booksUI = bookTools({getState:()=>state,request,render,showDialog,closeDialog,field,select,today,toast});
 async function action(name, id, el) {
+  if (await booksUI.handle(name, id)) return;
   if(await lifeUI.handle(name,id,el))return;
 
   switch (name) {
@@ -391,7 +498,78 @@ async function action(name, id, el) {
       showDialog('Install Episuite',`${await installationStatus()}<p>Use the same address on your devices to keep this workspace and offline capture queue together.</p><p><strong>iPhone / iPad:</strong> open in Safari, tap Share, then Add to Home Screen.</p><p><strong>Android / desktop:</strong> open the browser menu and choose Install app or Add to Home screen when offered.</p><p class="small">${window.isSecureContext?'If the browser has no install button yet, use its menu. On iPhone, choose Share → Add to Home Screen and keep Open as Web App enabled if shown.':'This address uses plain HTTP. For your Tailscale production setup, open the HTTPS .ts.net address printed by Tailscale Serve. elysium:3210 and a LAN IP work for testing, but cannot enable full phone offline installation.'}</p>`);return;
     }
     case 'session-feeling': await request('/api/engagement/feeling',{sessionId:id,feeling:el.dataset.feeling});$('#momentum-win')?.remove();render();toast(el.dataset.feeling==='quieter'?'Feedback is quieter. Change it any time in Settings.':'Saved. This helps you notice what works.');return;
-    case 'leave-runway': {const t=taskById(id);if(!canLeaveRunway(id))return;showDialog('Make the next start easier',`<p>For: ${esc(t.title)}. Leave one action your future self can begin.</p><input type="hidden" name="id" value="${esc(id)}">${field('Next tiny action', 'title','','text','required maxlength="300" placeholder="Open the worksheet at problem two…"')}`,'runway','Save next move');return;}
+    case 'leave-runway': {
+      const task = taskById(id);
+      if (!canLeaveRunway(id)) return;
+      showDialog('Save where I am', `<p>${esc(task.title)}</p><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="expectedVersion" value="${task.editVersion || 0}">${field('One action to begin with next time', 'title', task.nextAction, 'text', 'maxlength="240"')}`, 'runway', 'Save next action');
+      return;
+    }
+    case 'choose-priority': {
+      const plan = state.dayPlans?.[today()] || {};
+      const tasks = state.tasks.filter(task => !task.deleted && (!done(task, today()) || task.id === plan.taskId));
+      showDialog('Choose today’s outcome',
+        `<input type="hidden" name="expectedVersion" value="${plan.editVersion || 0}">` +
+        select('Task', 'taskId', [['', 'No linked task'], ...tasks.map(task => [task.id, task.title])], plan.taskId || '') +
+        field('What would count as progress?', 'outcome', plan.outcome, 'text', 'maxlength="240"'),
+        'day-priority', 'Save outcome');
+      return;
+    }
+    case 'weekly-review': weeklyReviewDialog(); return;
+    case 'focus-setup':
+      showDialog('Prepare my focus', `<p>Turn on your device’s Focus or Do Not Disturb mode if it helps. Keep important people and alerts on its allow list.</p>
+        <p>For reading or writing, try pausing spoken audio. Silence and the existing non-speech soundscapes are both options.</p>
+        <div class="row wrap">${btn('Usual audio', 'focus-audio-preset', 'usual')}${btn('Speech-free', 'focus-audio-preset', 'quiet')}${btn('Choose my next trial', 'choose-audio-trial')}${btn(state.settings.quietFocus ? 'Use full feedback' : 'Use quiet focus', 'toggle-quiet-focus')}</div>`);
+      return;
+    case 'toggle-quiet-focus':
+      await request('/api/settings', { quietFocus: !state.settings.quietFocus });
+      closeDialog(); render(); return;
+    case 'focus-audio-preset':
+      audioCondition = id;
+      if (id === 'quiet') soundscape('off');
+      closeDialog(); render();
+      toast(id === 'quiet' ? 'Speech-free selected. Pause spoken audio on your device.' : 'Usual audio selected.');
+      return;
+    case 'choose-audio-trial':
+      audioCondition = crypto.getRandomValues(new Uint8Array(1))[0] % 2 ? 'usual' : 'quiet';
+      if (audioCondition === 'quiet') soundscape('off');
+      closeDialog();
+      toast(audioCondition === 'quiet' ? 'Next trial selected. Pause spoken audio for this block.' : 'Next trial selected. Use your usual audio for this block.');
+      return;
+    case 'take-focus-break': {
+      const timer = state.timer;
+      if (!timer || timer.mode !== 'focus') return;
+      await request('/api/timer/finish', { timerId: timer.id, early: true });
+      if (!state.timer) await request('/api/timer/start', { mode: 'short', minutes: state.settings.shortBreak });
+      render(); $('#main')?.focus();
+      toast('Focus saved. Stretch, get water, or look away.');
+      return;
+    }
+    case 'focus-reset-plan':
+      showDialog('Return after a distraction', `<p>If I open an unrelated site during this block, I close it, stand up briefly, then return to the next action I chose.</p>
+        <p>For an extra boundary, set a Focus or screen-time limit in your device settings.</p>
+        <div class="row wrap">${btn('Back to focus', 'close-dialog', '', 'primary')}${btn('Log this reset privately', 'focus-experiment-reset')}</div>`);
+      return;
+    case 'focus-experiment-audio': focusExperimentDialog(); return;
+    case 'focus-experiment-reset': focusExperimentDialog('reset'); return;
+    case 'focus-experiments': {
+      const entries = await experimentRecords(state.workspaceId);
+      showDialog('Private focus experiments', `<div class="productivity-scroll">${experimentSummary(entries)}</div>
+        <p class="small">Only coarse outcomes and optional friction ratings are saved here. This data stays in this browser, outside workspace backups.</p>
+        <div class="row wrap">${btn('Log an audio trial', 'focus-experiment-audio')}${btn('Log a browsing reset', 'focus-experiment-reset')}${entries.length ? btn('Delete trial data', 'clear-focus-experiments') : ''}</div>`);
+      return;
+    }
+    case 'clear-focus-experiments':
+      showDialog('Delete trial data?', `<p>This deletes the trial entries for this workspace on this browser.</p>${btn('Delete trial data', 'confirm-clear-focus-experiments', '', 'danger')}`);
+      return;
+    case 'confirm-clear-focus-experiments':
+      await clearExperiments(state.workspaceId);
+      closeDialog(); toast('Trial data deleted from this browser.'); return;
+    case 'habit-minimum': case 'habit-rest': case 'habit-undo-rest':
+      await request(`/api/tasks/${id}/habit`, { action: name.slice(6) });
+      render();
+      toast(name === 'habit-minimum' ? 'Your habit check-off is saved.' : name === 'habit-rest' ? 'Rest recorded.' : 'Rest removed.');
+      return;
+    case 'habit-restart': return action('burst', id);
     case 'return-cue': {const p=momentum(state,today()).prefs;showDialog('A reason to come back',`<p>Pair a tiny start with something you already do. Choose a reason that matters to you.</p>${field('What is this time for?', 'intent',p.intent,'text','maxlength="160" placeholder="Learning, making room for people, building my future…"')}${field('After what everyday moment?', 'cue',p.cue,'text','maxlength="160" placeholder="After breakfast, after class, when I sit down…"')}<p class="small muted">This is a cue you choose, not a notification or obligation.</p>`,'return-cue','Keep my cue');return;}
     case 'picker': actionChoices=[];actionPicker();return;
     case 'picker-next': actionPicker();return;
@@ -412,7 +590,7 @@ async function action(name, id, el) {
     case 'graph-color-preset':{const input=document.querySelector('[name="graphAccent"]');input.value=id;previewGraphAccent(id);return;}
     case 'social-remove-photo':$('#dialog .photo-crop')?.dispatchEvent(new Event('crop-dispose'));$('#dialog [name="photo"]').value='';$('#person-photo-preview').src='/icon.svg';return;
     case 'purge-task':{const t=taskById(id);showDialog('Permanently delete task?',`<p><strong>${esc(t.title)}</strong> and its completion history will be removed from this workspace. This cannot be undone here.</p><p class="small muted">Recorded focus time and earned coins stay. Existing backup files are unchanged.</p><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="expectedVersion" value="${t.editVersion||0}">${field('Type DELETE to confirm','confirmation','','text','required pattern="DELETE" autocomplete="off"')}`,'purge-task','Delete forever');return;}
-    case 'task-history': {const t=taskById(id);showDialog(t.title,heatmap(Object.fromEntries(Object.entries(t.history||{}).map(([d,e])=>[d,e.length])),today(),'Completion history'));return;}
+    case 'task-history': {const t=taskById(id);showDialog(t.title,heatmap(Object.fromEntries(Object.entries(t.history||{}).map(([d,e])=>[d,e.length])),today(),'Completion history')+habitSummary(t,today(),state.settings.timezone));return;}
     case 'unselect-task': await request(`/api/tasks/${id}`,{lane:'inbox'},'PATCH');render();toast('Removed from today. Still in All open.');return;
     case 'submit': return;
     case 'phone-test': await request('/api/notifications/test',{}); toast('Test queued. Check delivery status here in a few seconds.'); return;
@@ -483,7 +661,14 @@ async function action(name, id, el) {
     case 'restart': { const t = next(); showDialog('Begin again from here', `<p>Put both feet on the floor. Take a sip of water. Choose a tiny action.</p><div class="support green" style="margin-top:20px"><h3>${t ? esc(t.title) : 'Make room for one task.'}</h3><p>${t?.steps.find(s => !s.done)?.title ? esc(t.steps.find(s => !s.done).title) : 'Open what you need. That can be enough to start.'}</p>${btn('Try just two minutes', 'restart-focus', t?.id || '', 'primary')}${btn('Choose a different task', 'restart-choose', '', 'text')}</div>`); return; }
     case 'restart-choose': closeDialog(); page = 'tasks'; taskTab = 'all'; location.hash = page; render(); return;
     case 'restart-focus': closeDialog(); selectedTask = id || null; duration = 2; timerMode = 'focus'; page = 'focus'; location.hash = page; render(); return;
-    case 'end-day': {const m=metrics(state,today()); showDialog('Enough for today', `<div class="day-receipt"><span class="eyebrow">YOUR EFFORT, KEPT</span><strong>${m.focus}<small>focus minutes</small></strong><strong>${m.completed}<small>useful check-offs</small></strong></div><p>Unfinished tasks will return to All tasks. No progress or history is lost.</p><div class="field" style="margin-top:20px"><label for="reflection">What helped today? (optional)</label><textarea id="reflection" name="reflection" maxlength="2000" placeholder="A small thing I noticed…"></textarea></div>`, 'end-day', 'Close the day'); return; }
+    case 'end-day': {
+      const task = dayPriority(state, today());
+      const rollover = task && !done(task, today())
+        ? `<p>${esc(task.title)}</p>${select('Unfinished priority', 'rollover', [['defer', 'Keep in All tasks'], ['carry', 'Carry as tomorrow’s outcome'], ['schedule', 'Schedule a block tomorrow']], 'defer')}${field('Start time if scheduling', 'start', '09:00', 'time')}`
+        : '<p>Unfinished shortlist tasks stay available in All tasks.</p>';
+      showDialog('Close the day', rollover + `<div class="field"><label for="reflection">What helped today? (optional)</label><textarea id="reflection" name="reflection" maxlength="2000"></textarea></div>`, 'end-day', 'Close the day');
+      return;
+    }
     case 'menu-nav': closeDialog();return action('nav',id);
     case 'social-new-circle': showDialog('Create a circle',circleForm(),'social-circle','Save circle');return;
     case 'social-edit-circle': showDialog('Edit circle',circleForm(state.social.circles.find(c=>c.id===id)),'social-circle','Save circle');return;
@@ -563,13 +748,26 @@ document.addEventListener('submit', async event => {
   const data = Object.fromEntries(new FormData(form)), type = form.dataset.form;if(data.color==='custom')data.color=data.customColor; const submit = form.querySelector('[type=submit]');
   try {
     busy = true; if (submit) submit.disabled = true;
+    if (await booksUI.submit(type, data, form)) return;
     if (type.startsWith('capture')) { await saveCapture(data.text); if (type === 'capture-dialog') closeDialog(); else form.reset(); render(); toast(online ? 'Saved. You can come back to it.' : 'Saved on this device. We’ll sync when your server returns.'); }
     else if(type==='calendar-appearance'){await request('/api/settings',{calendarPastStyle:data.calendarPastStyle});render();toast('Calendar appearance saved.');}
     else if(type==='mobile-nav'){const mobilePages=[0,1,2,3].map(i=>data['slot'+i]);if(new Set(mobilePages).size!==4)throw Error('Choose four different pages.');await request('/api/settings',{mobilePages});render();toast('Mobile navigation saved.');}
     else if(type==='life-board'){const payload={graphs:(()=>{const selected=[...new FormData(form).getAll('graphs')],previous=state.life?.board?.graphs||[];return [...previous.filter(id=>selected.includes(id)),...selected.filter(id=>!previous.includes(id))];})(),expectedBoardVersion:Number(data.expectedBoardVersion)};if(data.sectionSettings==='true')payload.graphAccent=data.graphAccent;if(data.sectionSettings==='true')for(const key of ['showFlame','showShortcuts','showTotals'])payload[key]=form.elements[key].checked;await request('/api/life/board',payload);closeDialog();render();toast('Your board, your choices.');}
     else if(type==='purge-task'){await request(`/api/tasks/${data.id}/purge`,{confirmation:data.confirmation,expectedVersion:Number(data.expectedVersion)},'DELETE');if(selectedTask===data.id)selectedTask=null;closeDialog();render();toast('Task permanently deleted.');}
     else if(type==='shortcut'){await request(data.id?`/api/life/shortcuts/${data.id}`:'/api/life/shortcuts',data,data.id?'PATCH':'POST');closeDialog();render();toast('Shortcut saved.');}
-    else if(type==='runway'){const t=taskById(data.id);if(!t||t.deleted)throw Error('This task is no longer available.');if(t.steps.length>=30)throw Error('This task has 30 steps. Edit its steps to make room.');await request(`/api/tasks/${data.id}`,{steps:[{id:uid(),title:data.title,done:false},...t.steps]},'PATCH');closeDialog();render();toast('A runway for your next start.');}
+    else if (type === 'runway') {
+      await request(`/api/tasks/${data.id}`, { nextAction: data.title, expectedVersion: data.expectedVersion }, 'PATCH');
+      closeDialog(); render(); toast('Next action saved.');
+    }
+    else if (type === 'day-priority' || type === 'weekly-review') {
+      await request(type === 'day-priority' ? '/api/day/priority' : '/api/weekly-review', data);
+      closeDialog(); render(); toast(type === 'day-priority' ? 'Outcome saved.' : 'Weekly review saved.');
+    }
+    else if (type === 'focus-experiment') {
+      if (!state.workspaceId) throw Error('Open your workspace to save a trial.');
+      await saveExperiment(state.workspaceId, uid(), { ...data, friction: Number(data.friction) });
+      closeDialog(); toast('Trial saved on this device.');
+    }
     else if(type==='return-cue'){await request('/api/engagement',{intent:data.intent,cue:data.cue});closeDialog();render();toast('Your cue is ready.');}
     else if (type === 'engagement') { for(const key of ['feedback','novelty','haptics','chime'])data[key]=form.elements[key].checked; await request('/api/engagement',data); $('#momentum-win')?.remove(); render(); toast('Encouragement saved.'); }
     else if (type === 'quick-task') { await request('/api/tasks', { title: data.title }); form.reset(); render(); toast('Safe in All tasks.'); }
@@ -586,11 +784,11 @@ document.addEventListener('submit', async event => {
     else if (type === 'commitment' || type === 'social-plan') {data.socialPlan=type==='social-plan'; data.personIds=new FormData(form).getAll('personIds');data.commitment=true;data.weekdays=new FormData(form).getAll('weekdays').map(Number);await request(data.id?`/api/blocks/${data.id}`:'/api/blocks',data,data.id?'PATCH':'POST');closeDialog();render();toast('Commitment saved. Occurrences and reminders are ready.'); }
     else if (type === 'block') { data.personIds=new FormData(form).getAll('personIds');data.taskIds = new FormData(form).getAll('taskIds'); await request(data.id ? `/api/blocks/${data.id}` : '/api/blocks', data, data.id ? 'PATCH' : 'POST'); closeDialog(); render(); toast('A little structure added.'); }
     else if (type === 'template') { await request(`/api/templates/save?date=${planDate}`, { name: data.name }); closeDialog(); render(); }
-    else if (type === 'end-day') { await request('/api/day/end', { reflection: data.reflection }); closeDialog(); render(); toast('Enough for today. Your tasks are safe.'); }
+    else if (type === 'end-day') { await request('/api/day/end', data); closeDialog(); render(); toast('Day closed.'); }
     else if (type === 'reward') { const id=data.id;delete data.id;await request(id?'/api/rewards/'+id:'/api/rewards',data,id?'PATCH':'POST');closeDialog();render(); }
     else if(type==='reward-events'){data.enabled=form.elements.enabled.checked;await request('/api/reward-events/config',data);render();toast('Reward preferences saved.');}
     else if(type==='phone'){for(const key of ['enabled','boosts','reminders','timers','clearBotToken','clearNtfyToken'])data[key]=form.elements[key].checked;await request('/api/notifications/config',data);render();toast('Phone connection saved.');}
-    else if (type === 'settings') { for (const key of ['sound', 'gamification', 'lowStim', 'reducedMotion', 'autoBreak']) data[key] = form.elements[key].checked; await request('/api/settings', data); if (!state.timer) duration = timerMode === 'focus' ? state.settings.focusMinutes : timerMode === 'short' ? state.settings.shortBreak : state.settings.longBreak; render(); toast('Your preferences are saved.'); }
+    else if (type === 'settings') { for (const key of ['sound', 'gamification', 'lowStim', 'reducedMotion', 'autoBreak', 'quietFocus', 'showStreaks', 'disableLetterShortcuts']) data[key] = form.elements[key].checked; await request('/api/settings', data); if (!state.timer) duration = timerMode === 'focus' ? state.settings.focusMinutes : timerMode === 'short' ? state.settings.shortBreak : state.settings.longBreak; render(); toast('Your preferences are saved.'); }
     else if (type === 'category') { await request('/api/categories', data); if ($('#dialog').open) closeDialog(); render(); toast('Category added. You can use it when editing a task.'); }
     else if (type === 'calendar') { await request('/api/calendar/config', data); render(); toast('Calendar connection saved.'); }
     else if (type === 'ai-settings') { await request('/api/settings', data); toast('Local AI model saved.'); }
@@ -608,7 +806,7 @@ document.addEventListener('change', async event => {
   if (el.id === 'focus-task-select') { selectedTask = el.value || null; render(); }
   if (el.id === 'sound-select') { try { soundscape(el.value); } catch { toast('Audio is unavailable on this device.'); } }
   if (el.id === 'import-file' && el.files[0]) {
-    try { if (el.files[0].size > 5_000_000) throw new Error('Choose a backup smaller than 5 MB.'); pendingImport = JSON.parse(await el.files[0].text()); showDialog('Import this backup?', `<p>This replaces the imported task and schedule records. Episuite saves your current data to a backup file on the server first.</p><p class="small" style="margin-top:12px">Active timers will be cleared. Calendar credentials will stay on this machine.</p><div class="dialog-foot">${btn('Cancel', 'close-dialog', '', 'secondary')}${btn('Import & keep a backup', 'confirm-import', '', 'primary')}</div>`); } catch (e) { toast(e.message || 'This backup could not be read.'); } el.value = '';
+    try { if (el.files[0].size > 64 * 1024 * 1024) throw new Error('Choose a portable backup up to 64 MiB.'); pendingImport = el.files[0]; showDialog('Import this backup?', `<p>This replaces the imported task and schedule records. Episuite saves your current data to a backup file on the server first.</p><p class="small" style="margin-top:12px">Active timers will be cleared. Calendar credentials will stay on this machine.</p><div class="dialog-foot">${btn('Cancel', 'close-dialog', '', 'secondary')}${btn('Import & keep a backup', 'confirm-import', '', 'primary')}</div>`); } catch (e) { toast(e.message || 'This backup could not be read.'); } el.value = '';
   }
   if (el.id === 'video-file' && el.files[0]) {
     const file = el.files[0]; if (file.size > 30_000_000 || !['video/mp4', 'video/webm'].includes(file.type)) { toast('Choose an MP4 or WebM video smaller than 30 MB.'); return; }
@@ -628,9 +826,10 @@ document.addEventListener('input', event => {
 });
 document.addEventListener('keydown', async event => {
   if (event.target.matches('input,textarea,select,[contenteditable]') || event.ctrlKey || event.metaKey || event.altKey || $('#dialog').open) return;
-  if (event.key.toLowerCase() === 'c') { event.preventDefault(); action('quick-capture'); }
-  if (event.key.toLowerCase() === 'n') { event.preventDefault(); taskDialog(); }
-  if (event.key.toLowerCase() === 'f') { event.preventDefault(); page = 'focus'; location.hash = page; render(); }
+  const letterShortcuts = !state?.settings.disableLetterShortcuts;
+  if (letterShortcuts && event.key.toLowerCase() === 'c') { event.preventDefault(); action('quick-capture'); }
+  if (letterShortcuts && event.key.toLowerCase() === 'n') { event.preventDefault(); taskDialog(); }
+  if (letterShortcuts && event.key.toLowerCase() === 'f') { event.preventDefault(); page = 'focus'; location.hash = page; render(); }
   if (event.code === 'Space' && page === 'focus' && !event.target.matches('button,a')) { event.preventDefault(); try { await action(state.timer ? state.timer.status === 'paused' ? 'resume' : 'pause' : 'start'); } catch (e) { toast(e.message); } }
 });
 $('#dialog').addEventListener('click', event => { if (event.target === $('#dialog')) { const r = $('#dialog').getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) closeDialog(); } });

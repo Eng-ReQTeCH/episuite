@@ -11,8 +11,9 @@ export const dateKey = (time = Date.now(), zone = 'Africa/Cairo') => new Intl.Da
 export const addDays = (date, days) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 export function initialState() {
   return { version: 1, revision: 0, tasks: [], blocks: [], templates: [], sessions: [], events: [], notes: [], social: {circles:[],people:[],checkins:[]},
+    reading: {books: [], taskId: 'auto', taskVersion: 0, credits: []},
     categories: ['Personal', 'Work', 'Health', 'Learning', 'Home'],
-    settings: { calendarPastStyle:'gray', name: '', timezone: 'Africa/Cairo', theme: 'light', focusMinutes: 25, shortBreak: 5, longBreak: 15, cycles: 4, partialThreshold: 90, sound: true, volume: .25, gamification: true, reducedMotion: false, lowStim: false, autoBreak: false, dailyGoal: 2, accent: '#316b57', timerFont: 'sans', background: '', ollamaModel: 'llama3.2' },
+    settings: { quietFocus: false, showStreaks: true, disableLetterShortcuts: false, calendarPastStyle:'gray', name: '', timezone: 'Africa/Cairo', theme: 'light', focusMinutes: 25, shortBreak: 5, longBreak: 15, cycles: 4, partialThreshold: 90, sound: true, volume: .25, gamification: true, reducedMotion: false, lowStim: false, autoBreak: false, dailyGoal: 2, accent: '#316b57', timerFont: 'sans', background: '', ollamaModel: 'llama3.2' },
     coins: 0, earned: 0, legacyFocus: 0, legacyCompleted: 0, legacyDays: {}, purchases: [],
     rewards: [{ id: 'tea', name: 'A good cup of tea', cost: 15, minutes: 10 }, { id: 'episode', name: 'An episode of something good', cost: 50, minutes: 25 }],
     redemption: null, timer: null, wake: {}, checkins: {}, blockFeedback: {}, calendar: { url: '', username: '', password: '', eventUrls: {} }, archivedLegacy: null };
@@ -27,7 +28,16 @@ export function taskInput(input, existing = {}) {
   if (due && !validDate(due)) throw new InputError('Choose a valid due date.');
   const minimumGapMinutes = Number(input.minimumGapMinutes ?? existing.minimumGapMinutes ?? (repeat.startsWith('interval_') && Number(repeat.slice(9)) < 1 ? 360 : 0));
   if (!Number.isInteger(minimumGapMinutes) || minimumGapMinutes < 0 || minimumGapMinutes > 1440) throw new InputError('Choose a gap between 0 and 1440 minutes.');
+  const habitPlan = Object.fromEntries(['cue', 'minimum', 'obstacle'].map(key => {
+    const field = 'habit' + key[0].toUpperCase() + key.slice(1);
+    const value = input[field] ?? existing.habitPlan?.[key];
+    return [key, typeof value === 'string' ? value.trim().slice(0, 240) : ''];
+  }));
+  const habitRest = Object.fromEntries(Object.entries(existing.habitRest || {}).filter(([day, count]) =>
+    validDate(day) && Number.isInteger(count) && count > 0 && count <= 20));
   return { ...existing, id: existing.id ? String(existing.id) : uid(), title, description: String(input.description ?? existing.description ?? '').slice(0, 3000),
+    nextAction: typeof (input.nextAction ?? existing.nextAction) === 'string' ? (input.nextAction ?? existing.nextAction).trim().slice(0, 240) : '',
+    habitPlan, habitRest,
     minimumGapMinutes, personIds: Array.isArray(input.personIds) ? [...new Set(input.personIds.map(String))].slice(0,50) : existing.personIds || [], socialContact: Boolean(existing.socialContact),
     category: String(input.category ?? existing.category ?? 'Personal').slice(0, 50), minutes: finite(input.minutes ?? existing.minutes, 1, 480, 15),
     energy: ['low', 'medium', 'high'].includes(input.energy ?? existing.energy) ? (input.energy ?? existing.energy) : 'medium',
@@ -48,6 +58,7 @@ export function taskStreak(task, date) {
   return {current, active};
 }
 export function done(task, date) { return task.repeat === 'none' ? task.completed : countToday(task, date) >= task.target; }
+export function habitRestCount(task, date) { return Math.min(task.habitRest?.[date] || 0, Math.max(0, task.target - countToday(task, date))); }
 export function nextEligibleAt(task, date) {
   if (!task.repeat.startsWith('interval_') || Number(task.repeat.slice(9)) >= 1 || !countToday(task,date) || done(task,date)) return null;
   const last = Math.max(...(task.history?.[date] || []).map(e=>Number(e.at)||0));
@@ -55,12 +66,37 @@ export function nextEligibleAt(task, date) {
 }
 export function isDue(task, date, now = Date.now()) {
   if (task.deleted || done(task, date)) return false;
+  if (task.repeat !== 'none' && countToday(task, date) + habitRestCount(task, date) >= task.target) return false;
   if (task.due && task.due > date) return false;
   if (task.repeat === 'none' || task.repeat === 'daily') return true;
   const days = task.repeat === 'weekly' ? 7 : Number(task.repeat.slice(9));
   if (days < 1) return (nextEligibleAt(task,date) ?? 0) <= now;
-  const dates = Object.keys(task.history || {}).filter(d => d <= date && task.history[d].length).sort();
+  const dates = [...new Set([
+    ...Object.keys(task.history || {}).filter(day => countToday(task, day) > 0),
+    ...Object.keys(task.habitRest || {}).filter(day => task.habitRest[day] > 0)
+  ])].filter(day => day <= date).sort();
   return !dates.length || date >= addDays(dates.at(-1), days);
+}
+
+export function habitOpportunities(task, start, end, timezone) {
+  const created = dateKey(task.created || Date.now(), timezone);
+  const days = task.repeat === 'weekly' ? 7 : task.repeat.startsWith('interval_') ? Number(task.repeat.slice(9)) : 1;
+  const interval = Math.max(1, Math.ceil(days));
+  const previous = [...new Set([
+    ...Object.keys(task.history || {}).filter(date => countToday(task, date)),
+    ...Object.keys(task.habitRest || {}).filter(date => task.habitRest[date] > 0)
+  ])].filter(date => date < start).sort().at(-1);
+  let next = previous ? addDays(previous, interval) : task.due > created ? task.due : created;
+  while (next < start) next = addDays(next, interval);
+  const entries = [];
+  for (let date = start; date <= end; date = addDays(date, 1)) {
+    const completed = countToday(task, date), rest = habitRestCount(task, date);
+    const scheduled = date >= next && date >= created && (!task.due || date >= task.due);
+    if (!scheduled && !completed && !rest) continue;
+    entries.push({ date, completed, rest, missed: scheduled && date < end ? Math.max(0, task.target - rest - completed) : 0 });
+    if (scheduled || completed) next = addDays(date, interval);
+  }
+  return entries;
 }
 export function chooseNext(state, date, energy = 'medium', now = Date.now()) {
   const rank = { low: 0, medium: 1, high: 2 };
@@ -228,14 +264,29 @@ export function finishTimer(state, now = Date.now(), early = false) {
   state.sessions.push(session); state.coins += coins; state.earned += coins; state.timer = null; return session;
 }
 export function metrics(state, date) {
-  const focus = state.sessions.filter(s => s.mode === 'focus');
-  const completions = state.tasks.flatMap(t => Object.entries(t.history).flatMap(([day, entries]) => entries.map(e => ({ ...e, day }))));
-  return { focus: focus.filter(s => s.date === date).reduce((n, s) => n + s.minutes, 0) + Number(state.legacyDays?.[date]?.focusMinutes || 0),
-    totalFocus: focus.reduce((n, s) => n + s.minutes, 0) + state.legacyFocus,
-    completed: completions.filter(e => e.day === date).length,
-    totalCompleted: completions.length + state.legacyCompleted,
-    sessions: focus.filter(s => s.date === date && s.full).length,
-    activeDays: new Set([...focus.map(s => s.date), ...completions.map(e => e.day)]).size };
+  const totals = {
+    focus: Number(state.legacyDays?.[date]?.focusMinutes || 0), totalFocus: state.legacyFocus,
+    completed: 0, totalCompleted: state.legacyCompleted, sessions: 0, activeDays: 0
+  };
+  const days = new Set();
+  for (const session of state.sessions) {
+    if (session.mode !== 'focus') continue;
+    totals.totalFocus += session.minutes;
+    days.add(session.date);
+    if (session.date === date) {
+      totals.focus += session.minutes;
+      if (session.full) totals.sessions++;
+    }
+  }
+  for (const task of state.tasks) {
+    for (const [day, entries] of Object.entries(task.history)) {
+      totals.totalCompleted += entries.length;
+      if (entries.length) days.add(day);
+      if (day === date) totals.completed += entries.length;
+    }
+  }
+  totals.activeDays = days.size;
+  return totals;
 }
 export function legacyImport(payload, current) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new InputError('Choose an Episuite or EpiApps JSON backup.');

@@ -1,17 +1,16 @@
+import {chromium,browserOptions} from './browser-runtime.mjs';
 import {fileURLToPath} from 'node:url';
-import {createRequire} from 'node:module';
 import {mkdtemp,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {createApp} from '../server.mjs';
-let require=createRequire(import.meta.url),chromium;try{({chromium}=require('playwright'));}catch{require=createRequire('C:/Users/Monty/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/package.json');({chromium}=require('playwright'));}
 const app=await createApp({dataDir:await mkdtemp(path.join(tmpdir(),'life-browser-')),backgroundInterval:0});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.server.address().port}`;
 const post=async(p,data)=>{const r=await fetch(base+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});assert.equal(r.status,200);return r.json();};
 await post('/api/onboarding',{status:'paused',step:0});for(const [title,lane] of [['Old inbox','inbox'],['Old someday','later'],['Selected task','today']])await post('/api/tasks',{title,lane});await post('/api/tasks',{title:'German study',repeat:'daily',category:'German'});
 let browser;const nativeNow=Date.now;
 try{
- browser=await chromium.launch({headless:true,executablePath:process.env.LIFE_BROWSER||'C:/Users/Monty/AppData/Local/ms-playwright/chromium-1248/chrome-win64/chrome.exe'});const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ browser=await chromium.launch({...browserOptions});const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
  page.setDefaultTimeout(12000);await page.goto(base+'/#tasks');await page.locator('.task-row').first().waitFor();assert.equal(await page.locator('.task-row').count(),4);assert.equal(await page.locator('[data-action="task-tab"][data-id="later"]').count(),0);
  await page.locator('.task-row').filter({hasText:'Selected task'}).locator('.task-more summary').click();await page.locator('[data-action="unselect-task"]').click();assert.equal(await page.locator('.task-row').count(),4);await page.locator('.task-row').filter({hasText:'German study'}).locator('[data-action="complete"]').click();
  await page.locator('.task-row').filter({hasText:'Old someday'}).locator('.task-more summary').click();await page.locator('.task-row').filter({hasText:'Old someday'}).locator('[data-action="task-history"]').click();await page.locator('#dialog .heat-grid').waitFor();await page.locator('#dialog [data-action="close-dialog"]').click();

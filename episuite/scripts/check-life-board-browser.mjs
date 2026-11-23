@@ -1,4 +1,4 @@
-import {createRequire} from 'node:module';
+import {chromium,browserOptions} from './browser-runtime.mjs';
 import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -6,8 +6,6 @@ import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {createApp} from '../server.mjs';
 import {initialState,taskInput,dateKey,addDays} from '../public/domain.js';
-let require=createRequire(import.meta.url),chromium;
-try{({chromium}=require('playwright'));}catch{require=createRequire('C:/Users/Monty/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/package.json');({chromium}=require('playwright'));}
 const dir=await mkdtemp(path.join(tmpdir(),'life-board-browser-')),state=initialState(),day=dateKey();
 state.onboarding={status:'complete',step:7};state.settings.sound=false;
 state.tasks=[['German study','Learning'],['Move my body','Health'],['Read a little','Learning'],['Make music','Hobbies'],['Personal project','Work']].map(([title,category],i)=>{
@@ -22,7 +20,7 @@ const app=await createApp({dataDir:dir,backgroundInterval:0});await new Promise(
 const post=async(p,data)=>{const response=await fetch(base+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});assert.equal(response.status,200,await response.clone().text());return response.json();};
 const out=fileURLToPath(new URL('../test-results/',import.meta.url));await mkdir(out,{recursive:true});let browser;
 try{
- browser=await chromium.launch({headless:true,executablePath:process.env.LIFE_BROWSER||'C:/Users/Monty/AppData/Local/ms-playwright/chromium-1248/chrome-win64/chrome.exe'});
+ browser=await chromium.launch({...browserOptions});
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
  await context.route('**/favicon.ico',route=>route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28"><rect width="28" height="28" rx="6" fill="#80795d"/><text x="14" y="19" text-anchor="middle" fill="white" font-family="sans-serif" font-size="15">G</text></svg>'}));
  await page.goto(base+'/#life');await page.locator('.ember-panel').waitFor();

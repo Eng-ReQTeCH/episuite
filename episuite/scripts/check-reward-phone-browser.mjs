@@ -1,4 +1,4 @@
-import {createRequire} from 'node:module';
+import {chromium,browserOptions} from './browser-runtime.mjs';
 import {mkdtemp,writeFile,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -7,8 +7,6 @@ import assert from 'node:assert/strict';
 import {createApp} from '../server.mjs';
 import {initialState} from '../public/domain.js';
 import {rewardDefaults} from '../public/reward-events.js';
-const require=createRequire('C:/Users/Monty/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/package.json');
-const {chromium}=require('playwright');
 const dir=await mkdtemp(path.join(tmpdir(),'episuite-reward-browser-'));
 const state=initialState(),now=Date.now();
 state.onboarding={status:'paused',step:0};state.rewardEvents={config:{...rewardDefaults}};state.coins=500;
@@ -19,7 +17,7 @@ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));
 const base='http://127.0.0.1:'+app.server.address().port;
 let browser;
 try{
-  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+  browser=await chromium.launch({...browserOptions});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base);
   await page.locator('[data-action="nav"][data-id="settings"]').first().click();

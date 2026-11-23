@@ -18,6 +18,7 @@ AppSideService({
 
   fetchDayData(date, ctx) {
     const serverUrl = settingsStorage.getItem('serverUrl')
+    const token = settingsStorage.getItem('watchToken')
 
     if (!serverUrl) {
       ctx.response({ result: -1, error: 'no server URL' })
@@ -27,12 +28,12 @@ AppSideService({
     const apiUrl = serverUrl.replace(/\/+$/, '') +
       '/api/v1/day?date=' + encodeURIComponent(date)
 
-    fetch(apiUrl, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    })
+    const headers = { 'Accept': 'application/json' }
+    if (token) headers.Authorization = 'Bearer ' + token
+    fetch(apiUrl, { method: 'GET', headers })
     .then(response => response.json())
     .then(data => {
+      if (data.error) throw new Error(data.error)
       const day = data.day || data
       ctx.response({
         result: 0,
