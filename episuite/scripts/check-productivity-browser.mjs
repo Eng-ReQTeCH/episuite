@@ -81,7 +81,8 @@ try {
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   await context.setOffline(true);
   const capture = async (target, text) => {
-    await target.locator('[data-action="quick-capture"]').first().click();
+    // Keyboard activation avoids background-tab animation-frame throttling during concurrent capture.
+    await target.locator('[data-action="quick-capture"]').first().press('Enter');
     await target.locator('#quick-capture').fill(text);
     await target.locator('#dialog [type="submit"]').click();
     await target.locator('#dialog').waitFor({ state: 'hidden' });

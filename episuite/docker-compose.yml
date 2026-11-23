@@ -10,6 +10,7 @@ services:
       EPISUITE_TIMEZONE: "${EPISUITE_TIMEZONE:-Africa/Cairo}"
       EPISUITE_OLLAMA_URL: "${EPISUITE_OLLAMA_URL:-http://host.docker.internal:11434/api/generate}"
       EPISUITE_WATCH_TOKEN: "${EPISUITE_WATCH_TOKEN:-}"
+      EPISUITE_GOOGLE_BOOKS_KEY: "${EPISUITE_GOOGLE_BOOKS_KEY:-}"
       EPISUITE_BACKUP_DIR: "/app/backups"
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -1,5 +1,6 @@
 import { dateKey, done, InputError, isDue, toggleCompletion, uid, validDate, removeCompletion, taskProgress } from './domain.js';
 import { syncContactCompletion } from './social-domain.js';
+import { bookWebUrl } from './book-metadata.js';
 
 const text = (value, limit) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
 
@@ -22,8 +23,11 @@ export function bookInput(input, existing = {}, today = dateKey()) {
   if (totalPages !== null && currentPage > totalPages) throw new InputError('The current page exceeds the book’s page count.');
   const coverId = Object.hasOwn(input, 'coverId') ? input.coverId : existing.coverId ?? null;
   if (coverId !== null && (!Number.isSafeInteger(coverId) || coverId <= 0)) throw new InputError('Choose a valid book cover.');
-  const sourceId = text(input.sourceId ?? existing.sourceId, 80);
-  if (sourceId && !/^\/works\/OL\d+W$/.test(sourceId)) throw new InputError('Choose a valid book result.');
+  const sourceId = text(input.sourceId ?? existing.sourceId, 200);
+  if (sourceId && !/^(?:\/works\/OL\d+W|google:[\w-]{1,100}|archive:[\w.-]{1,150}|catalog:[a-z0-9-]{1,100})$/.test(sourceId)) throw new InputError('Choose a valid book result.');
+  const coverUrl = bookWebUrl(input.coverUrl ?? existing.coverUrl ?? '');
+  const sourceUrl = bookWebUrl(input.sourceUrl ?? existing.sourceUrl ?? '');
+  const provider = text(input.provider ?? existing.provider, 80);
   const finishedDate = status === 'finished' ? input.finishedDate ?? existing.finishedDate ?? today : '';
   if (status === 'finished' && (!validDate(finishedDate) || finishedDate > today)) throw new InputError('Choose a finish date up to today.');
   if (input.pinned !== undefined && typeof input.pinned !== 'boolean') throw new InputError('Choose a valid pin setting.');
@@ -31,7 +35,7 @@ export function bookInput(input, existing = {}, today = dateKey()) {
   if (existing.positionAt !== undefined && (!Number.isFinite(existing.positionAt) || existing.positionAt < 0)) throw new InputError('Invalid saved reading position.');
   return {
     id: existing.id || uid(), title, author: text(input.author ?? existing.author, 300),
-    sourceId, coverId, totalPages, currentPage, status, finishedDate,
+    sourceId, coverId, coverUrl, sourceUrl, provider, totalPages, currentPage, status, finishedDate,
     createdAt: existing.createdAt || Date.now(), editVersion: existing.editVersion || 0, logs: existing.logs || [],
     pinned: input.pinned ?? existing.pinned ?? false,
     basePage: input.currentPage !== undefined && existing.currentPage !== undefined && currentPage !== existing.currentPage ? currentPage : existing.basePage ?? existing.logs?.[0]?.from ?? currentPage,

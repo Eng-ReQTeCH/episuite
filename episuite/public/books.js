@@ -1,13 +1,14 @@
 import { escapeHTML as e } from './life.js';
 import { readingTask } from './books-domain.js';
 import { uid } from './domain.js';
+import { normalizeBookSearch } from './book-metadata.js';
 
 const button = (label, action, id = '', style = 'secondary') =>
   `<button type="button" class="btn ${style} compact" data-action="${action}" data-id="${e(id)}">${label}</button>`;
 
 function cover(book, size = 'M') {
-  return `<span class="book-cover">${book.coverId
-    ? `<img src="https://covers.openlibrary.org/b/id/${book.coverId}-${size}.jpg?default=false" alt="Cover of ${e(book.title)}" loading="lazy" referrerpolicy="no-referrer">`
+  return `<span class="book-cover">${book.coverUrl || book.coverId
+    ? `<img src="${e(book.coverUrl || `https://covers.openlibrary.org/b/id/${book.coverId}-${size}.jpg?default=false`)}" alt="Cover of ${e(book.title)}" loading="lazy" referrerpolicy="no-referrer">`
     : '<span class="book-cover-placeholder" aria-hidden="true">Aa</span>'}</span>`;
 }
 
@@ -16,8 +17,8 @@ function bookCard(book, today) {
   return `<article class="book-card" data-book="${e(book.id)}">
     ${cover(book)}
     <div class="book-card-content">
-      <h3><button class="task-title" data-action="book-details" data-id="${e(book.id)}">${e(book.title)}</button></h3>
-      ${book.author ? `<p class="small">${e(book.author)}</p>` : ''}
+      <h3><button class="task-title" data-action="book-details" data-id="${e(book.id)}"><bdi>${e(book.title)}</bdi></button></h3>
+      ${book.author ? `<p class="small" dir="auto">${e(book.author)}</p>` : ''}
       <p class="small book-position">${book.status === 'finished' ? 'Finished ' + e(book.finishedDate) : 'Page ' + book.currentPage + (book.totalPages ? ' of ' + book.totalPages : '')}</p>
       ${book.totalPages && book.status === 'reading' ? `<progress value="${book.currentPage}" max="${book.totalPages}" aria-label="${e(book.title)} reading progress"></progress>` : ''}
       ${pagesToday ? `<p class="small book-today">${pagesToday} page${pagesToday === 1 ? '' : 's'} read today</p>` : ''}
@@ -68,16 +69,17 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
 
   function searchDialog(results = null) {
     showDialog('Find your book', `<form data-form="book-search" class="book-search-form">
-      <label for="book-search-title">Book title</label>
-      <div class="row"><input id="book-search-title" name="query" value="${e(query)}" minlength="2" maxlength="200" required autocomplete="off">
+      <label for="book-search-title">Book title or author</label>
+      <div class="row"><input id="book-search-title" name="query" value="${e(query)}" minlength="2" maxlength="200" required autocomplete="off" dir="auto" placeholder="القائد طوني جورج">
       <button class="btn primary compact" type="submit">Search</button></div>
     </form>
     ${results === null ? '' : results.length ? `<div class="book-search-results">${results.map((book, index) => `
       <button type="button" class="book-result" data-action="book-choose" data-id="${index}">
-        ${cover(book)}<span><strong>${e(book.title)}</strong><span>${e(book.author) || 'Author unavailable'}</span>
-        ${book.year ? `<small>${book.year}</small>` : ''}</span>
+        ${cover(book)}<span><strong dir="auto">${e(book.title)}</strong><span dir="auto">${e(book.author) || 'Author unavailable'}</span>
+        <small>${e(book.provider || 'Open Library')}${book.year ? ' · '+book.year : ''}</small></span>
       </button>`).join('')}</div>` : '<p class="small">No matches found. Try another title or add the book manually.</p>'}
-    <div class="row wrap">${button('Add manually', 'book-manual', '', 'text')}<a class="small" href="https://openlibrary.org" target="_blank" rel="noopener noreferrer">Search and covers from Open Library</a></div>`);
+    <p class="small">Search by title, author, or both. Arabic spelling variants are matched. If a regional edition is missing, add it manually with a cover link.</p>
+    <div class="row wrap">${button('Add manually', 'book-manual', '', 'text')}<span class="small">Open Library · Google Books · Internet Archive · The Good Book Shop · verified author entries</span></div>`);
   }
 
   function bookForm(book, editing = false, skipDraft = false) {
@@ -88,8 +90,10 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
       <input type="hidden" name="expectedVersion" value="${editing ? book.editVersion : 0}">
       <input type="hidden" name="eventId" value="${createId}">
       <input type="hidden" name="coverId" value="${book.coverId ?? ''}"><input type="hidden" name="sourceId" value="${e(book.sourceId || '')}">
-      ${field('Title', 'title', book.title, 'text', 'required maxlength="300"')}
-      ${field('Author (optional)', 'author', book.author, 'text', 'maxlength="300"')}
+      <input type="hidden" name="sourceUrl" value="${e(book.sourceUrl || '')}"><input type="hidden" name="provider" value="${e(book.provider || '')}">
+      ${field('Title', 'title', book.title, 'text', 'required maxlength="300" dir="auto"')}
+      ${field('Author (optional)', 'author', book.author, 'text', 'maxlength="300" dir="auto"')}
+      <details><summary>Cover link (optional)</summary>${field('HTTPS cover image URL','coverUrl',book.coverUrl || '', 'url','maxlength="2048" placeholder="https://…"')}<p class="small">Use a direct image link for an edition missing from the catalogues.</p></details>
       <div class="form-grid">
         ${field('Total pages (optional)', 'totalPages', book.totalPages ?? '', 'number', 'min="1" max="1000000" step="1"')}
         ${field('Current page', 'currentPage', book.currentPage || 0, 'number', 'min="0" max="1000000" step="1" required')}
@@ -109,6 +113,7 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
     page = Math.max(0,Math.min(page,pages-1));
     showDialog(book.title, `${cover(book)}
       <p>${e(book.author)}</p><p>Page ${book.currentPage}${book.totalPages ? ' of '+book.totalPages : ''}</p>
+      ${book.sourceUrl ? `<p class="small"><a href="${e(book.sourceUrl)}" target="_blank" rel="noopener noreferrer">${e(book.provider || 'Book source')} ↗</a></p>` : ''}
       <div class="row wrap">${button('Log pages','book-log',book.id,'primary')}${button('Edit book','book-edit',book.id)}${button(book.pinned?'Unpin from Life OS':'Pin to Life OS','book-pin',book.id,'text')}</div>
       <h3 class="book-log-heading">Reading history · ${logs.length} sessions</h3>
       <ul class="book-log-history">${logs.slice(page*8,page*8+8).map(log=>`<li><div><time>${log.date}</time><p>Pages ${log.from}–${log.to} · +${log.to-log.from}</p></div><div class="row wrap">${button('Edit session','book-log-edit',book.id+':'+log.id,'text')}${button('Delete session','book-log-delete',book.id+':'+log.id,'text')}</div></li>`).join('')}</ul>
@@ -117,7 +122,7 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
 
   function library(page = 0) {
     const all = getState().reading.books;
-    const books = all.filter(book=>(libraryShelf==='all'||book.status===libraryShelf)&&[book.title,book.author].join(' ').toLowerCase().includes(libraryQuery.toLowerCase()));
+    const books = all.filter(book=>(libraryShelf==='all'||book.status===libraryShelf)&&normalizeBookSearch([book.title,book.author].join(' ')).includes(normalizeBookSearch(libraryQuery)));
     const lastRead = book => Math.max(0, ...book.logs.filter(log=>!log.deleted).map(log=>Date.parse(log.date+'T12:00:00Z')));
     const lastLogged = book => Math.max(0,...book.logs.filter(log=>!log.deleted).map(log=>log.at));
     books.sort((a,b)=>librarySort==='title'?a.title.localeCompare(b.title):librarySort==='author'?a.author.localeCompare(b.author):librarySort==='read'?lastRead(b)-lastRead(a)||lastLogged(b)-lastLogged(a)||b.createdAt-a.createdAt:Number(b.pinned)-Number(a.pinned)||b.createdAt-a.createdAt);
@@ -148,7 +153,7 @@ export function bookTools({ getState, request, render, showDialog, closeDialog, 
         const match = matches[Number(id)];
         if (match && coverTarget) {
           const existing = find(coverTarget.id);
-          bookForm({ ...existing, ...coverTarget.values, coverId: match.coverId, sourceId: match.sourceId, title: match.title, author: match.author, editVersion: Number(coverTarget.values.expectedVersion) }, true, true);
+          bookForm({ ...existing, ...coverTarget.values, coverId: match.coverId, coverUrl: match.coverUrl || '', sourceId: match.sourceId, sourceUrl: match.sourceUrl || '', provider: match.provider || '', title: match.title, author: match.author, editVersion: Number(coverTarget.values.expectedVersion) }, true, true);
           coverTarget = null;
         } else if (match) bookForm(match);
         return true;

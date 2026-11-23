@@ -468,7 +468,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
     assets['/life.js'] = ['life.js', 'text/javascript'];
     assets['/social.js'] = ['social.js', 'text/javascript'];
     assets['/social-domain.js'] = ['social-domain.js', 'text/javascript'];
-    for (const file of ['productivity.js', 'device-storage.js', 'productivity-ui.js', 'books-domain.js', 'books.js', 'projects.js', 'habit-schedule.js', 'operations.js', 'drafts.js', 'backup-ui.js', 'task-history.js']) assets['/' + file] = [file, 'text/javascript'];
+    for (const file of ['productivity.js', 'device-storage.js', 'productivity-ui.js', 'books-domain.js', 'books.js', 'projects.js', 'habit-schedule.js', 'operations.js', 'drafts.js', 'backup-ui.js', 'task-history.js', 'book-metadata.js']) assets['/' + file] = [file, 'text/javascript'];
     for(const file of ['icon-192.png','icon-512.png','apple-touch-icon.png'])assets['/'+file]=[file,'image/png'];
     if (!assets[p]) throw fail('Page not found.', 404);
     const [asset, type] = assets[p]; const content = await readFile(path.join(root, 'public', asset));

@@ -36,9 +36,9 @@ try {
     await page.locator('#dialog [type="submit"]').click();
     await page.locator('#dialog').waitFor({ state: 'hidden' }).catch(async error => { throw new Error(error.message + '\n' + await page.locator('#dialog').innerText() + '\n' + await page.locator('#toast').innerText()); });
   };
-  const search = async () => {
+  const search = async (title = 'Atomic Habits') => {
     await page.getByRole('button', { name: 'Add a book', exact: true }).click();
-    await page.locator('#book-search-title').fill('Atomic Habits');
+    await page.locator('#book-search-title').fill(title);
     await page.locator('[data-form="book-search"] [type="submit"]').click();
     await page.locator('.book-result').first().waitFor();
   };
@@ -93,6 +93,19 @@ try {
   await log(second.id, 5);
   assert.equal(app.getState().tasks[1].history[today].length, 1);
 
+  await search('القائد طوني جورج');
+  assert.equal(await page.locator('.book-result').count(),1);
+  assert.ok((await page.locator('.book-result').innerText()).includes('طوني جورج'));
+  assert.match(await page.locator('.book-result img').getAttribute('src'),/static\.wixstatic\.com/);
+  await page.locator('.book-result').click();
+  assert.equal(await page.locator('#f-title').inputValue(),'القائد');
+  assert.equal(await page.locator('#f-author').inputValue(),'طوني جورج');
+  await page.locator('#f-totalPages').fill('200');await save();
+  const arabic=app.getState().reading.books.at(-1);
+  await log(arabic.id,12);
+  assert.equal(app.getState().reading.books.at(-1).currentPage,12);
+  assert.match(app.getState().reading.books.at(-1).coverUrl,/static\.wixstatic\.com/);
+
   const directoryOut = fileURLToPath(new URL('../test-results/', import.meta.url));
   await mkdir(directoryOut, { recursive: true });
   await page.locator('#main').focus();
@@ -102,7 +115,7 @@ try {
   await page.screenshot({ path: path.join(directoryOut, 'books-phone.png'), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: path.join(directoryOut, 'books-desktop.png'), fullPage: true });
-  await page.locator('.book-card [data-action="book-details"]').first().click();
+  await page.locator(`#main [data-book="${second.id}"] [data-action="book-details"]`).first().click();
   await page.getByRole('button', { name: 'Edit book', exact: true }).click();
   await page.locator('#f-currentPage').fill('3');
   await save();

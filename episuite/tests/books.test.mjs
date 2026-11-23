@@ -80,7 +80,7 @@ test('search normalizes cover metadata, caches requests, and reports provider fa
   const search = createBookSearch(async url => {
     requests++;
     assert.equal(url.origin, 'https://openlibrary.org');
-    assert.equal(url.searchParams.get('title'), 'A book');
+    assert.equal(url.searchParams.get('q'), 'A book');
     assert.equal(url.searchParams.get('limit'), '12');
     return { ok: true, json: async () => ({ docs: [
       { key: '/works/OL1W', title: 'A book', author_name: ['An author'], cover_i: 12, number_of_pages_median: 200, first_publish_year: 2001 },
