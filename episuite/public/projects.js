@@ -1,4 +1,4 @@
-import { done, InputError, isDue, uid } from './domain.js';
+import { done, InputError, isDue, uid, dateKey } from './domain.js';
 import { escapeHTML as e } from './life.js';
 
 export function projectInput(data, existing = {}) {
@@ -73,7 +73,7 @@ export function projectMutation(state, path, method, data) {
 
 const button = (label, action, id = '', style = 'secondary') => `<button class="btn ${style} compact" type="button" data-action="${action}" data-id="${e(id)}">${label}</button>`;
 
-function card(state, project, today) {
+function card(state, project, today, compact = false, expanded = false) {
   const tasks = state.tasks.filter(task => task.projectId === project.id && !task.deleted);
   const completed = tasks.filter(task => done(task, today)).length;
   const next = tasks.find(task => task.id === project.nextTaskId && isDue(task, today)) || tasks.find(task => isDue(task, today));
@@ -83,27 +83,32 @@ function card(state, project, today) {
     ${project.waitingFor ? `<p class="small">Waiting for · ${e(project.waitingFor)}</p>` : ''}
     ${button('Add task', 'project-task', project.id)}
     ${next && project.status === 'active' ? `<p>Next · ${e(next.nextAction || next.title)}</p>${button('Start next task', 'burst', next.id, 'primary')}` : ''}
-    <section class="project-tasks"><h3>Tasks</h3>${tasks.map(task => `<p><button class="task-title" data-action="edit-task" data-id="${e(task.id)}">${e(task.title)}</button>${task.workStatus === 'waiting' ? ` · waiting for ${e(task.waitingFor || 'a next step')}` : ''}${!done(task,today)?button('Make next','project-next',task.id,'text'):''}</p>`).join('') || '<p class="small">Add the first task for this outcome.</p>'}</section>
+    ${expanded?`<section class="project-tasks"><h3>Tasks</h3>${tasks.map(task => `<p><button class="task-title" data-action="edit-task" data-id="${e(task.id)}">${e(task.title)}</button>${task.workStatus === 'waiting' ? ` · waiting for ${e(task.waitingFor || 'a next step')}` : ''}${!done(task,today)?button('Make next','project-next',task.id,'text'):''}</p>`).join('') || '<p class="small">Add the first task for this outcome.</p>'}</section>`:!compact&&tasks.length?button('Tasks ('+tasks.length+')','project-tasks',project.id,'text'):''}
   </article>`;
 }
 
-export function projectsPanel(state, today, compact = false) {
+export function projectsPanel(state, today, compact = false, status = 'active') {
   const projects = state.projects || [];
-  const visible = compact ? projects.filter(project => project.status !== 'done').slice(0, 2) : projects;
-  return `<section class="projects-panel"><div class="board-section-heading"><h2>Projects.</h2><div class="row wrap">${button('New project', 'project-new')}${compact && projects.length ? button('All projects', 'nav', 'projects', 'text') : ''}</div></div>
-    ${visible.length ? `<div class="book-grid">${visible.map(project => card(state, project, today)).join('')}</div>` : '<p class="small">Keep an outcome and its next task together.</p>'}</section>`;
+  const visible = compact ? projects.filter(project => project.status === 'active').slice(0, 2) : projects.filter(project=>project.status===status);
+  return `<section class="projects-panel"><div class="${compact?'board-section-heading':'page-heading'}"><${compact?'h2':'h1'}>Projects</${compact?'h2':'h1'}><div class="row wrap">${button('New project', 'project-new')}${compact && projects.length ? button('All projects', 'nav', 'projects', 'text') : ''}</div></div>
+    ${!compact?`<div class="tabs" aria-label="Project status">${[['active','Active'],['waiting','Waiting'],['done','Done']].map(([id,label])=>`<button data-action="project-status" data-id="${id}" aria-pressed="${status===id}" class="${status===id?'active':''}">${label} ${projects.filter(p=>p.status===id).length}</button>`).join('')}</div>`:''}
+    ${visible.length ? `<div class="book-grid">${visible.map(project => card(state, project, today, compact)).join('')}</div>` : '<p class="small">No '+status+' projects.</p>'}</section>`;
 }
 
 export function projectTools({ getState, request, render, showDialog, closeDialog, field, select, toast }) {
+  let status='active';
   return {
+    status:()=>status,
     async handle(name, id) {
+      if(name==='project-status'){status=id;render();return true;}
+      if(name==='project-tasks'){const state=getState(),project=state.projects.find(p=>p.id===id);if(!project)throw Error('Project not found.');showDialog(project.title,card(state,project,dateKey(Date.now(),state.settings.timezone),false,true));return true;}
       if (name === 'project-next') {
         const task = getState().tasks.find(item => item.id === id && !item.deleted);
         if (!task) throw Error('Task no longer exists.');
         const project = getState().projects.find(item => item.id === task.projectId);
         if (!project) throw Error('Project no longer exists.');
         await request('/api/projects/' + project.id, { nextTaskId: task.id, expectedVersion: project.editVersion }, 'PATCH');
-        render(); toast('Next task selected.'); return true;
+        closeDialog();render(); toast('Next task selected.'); return true;
       }
       if (!['project-new', 'project-edit', 'project-remove', 'project-confirm-remove'].includes(name)) return false;
       const state = getState(), project = state.projects.find(item => item.id === id);

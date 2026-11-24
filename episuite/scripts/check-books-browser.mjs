@@ -36,8 +36,9 @@ try {
     await page.locator('#dialog [type="submit"]').click();
     await page.locator('#dialog').waitFor({ state: 'hidden' }).catch(async error => { throw new Error(error.message + '\n' + await page.locator('#dialog').innerText() + '\n' + await page.locator('#toast').innerText()); });
   };
+  const addBook=async()=>{if(!await page.getByRole('button',{name:'Add a book',exact:true}).count())await page.locator('[data-action=life-customize]').click();await page.getByRole('button',{name:'Add a book',exact:true}).click();};
   const search = async (title = 'Atomic Habits') => {
-    await page.getByRole('button', { name: 'Add a book', exact: true }).click();
+    await addBook();
     await page.locator('#book-search-title').fill(title);
     await page.locator('[data-form="book-search"] [type="submit"]').click();
     await page.locator('.book-result').first().waitFor();
@@ -48,7 +49,7 @@ try {
     await save();
   };
   await page.goto(base + '/#life');
-  await page.locator('.books-panel').waitFor();
+  await page.locator('[data-action=life-customize]').waitFor();
   await search();
   assert.equal(await page.locator('.book-result').count(), 2);
   await page.locator('.book-result').first().click();
@@ -69,12 +70,12 @@ try {
   await page.locator(`[data-book="${book.id}"]`).waitFor();
   assert.match(await page.locator(`[data-book="${book.id}"] .book-position`).innerText(), /Page 40 of 322/);
   await log(book.id, 322);
-  await page.locator('[data-action=book-library-finished]').click();
+  await page.getByRole('button',{name:'All books',exact:true}).click();await page.locator('[name=libraryShelf]').selectOption('finished');
   assert.equal(app.getState().reading.books[0].status, 'finished');
   assert.ok((await page.locator('#dialog').innerText()).includes('Atomic Habits'));
 
   await page.locator('#dialog [data-action=close-dialog]').first().click();
-  await page.getByRole('button', { name: 'Add a book', exact: true }).click();
+  await addBook();
   await page.getByRole('button', { name: 'Add manually', exact: true }).click();
   await page.locator('#f-title').fill('A book from last year');
   await page.locator('#f-totalPages').fill('200');

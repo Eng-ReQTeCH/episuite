@@ -1,6 +1,6 @@
 // Presentation-only grouping: existing forms and delegated actions stay intact.
 const listPages = new Map();
-let settingsSection = 'appearance', captureQuery = '';
+let settingsSection = 'appearance', captureQuery = '', taskFiltersOpen=false;
 const text = (tag, value, cls) => { const node=document.createElement(tag);node.textContent=value;if(cls)node.className=cls;return node; };
 function integrateSection(parent, nodes, title, key, prepend = false) {
   nodes=nodes.filter(Boolean);if(!nodes.length)return;
@@ -27,8 +27,9 @@ function bounded(container, selector, key, size=6, query='') {
 function taskMenus(main){
   for(const row of main.querySelectorAll('.task-row')){
     const tools=row.querySelector('.task-tools');if(!tools)continue;
-    const secondary=[...tools.children].filter(n=>!['focus-task','today-task','undo-habit'].includes(n.dataset.action));
-    if(!secondary.length)continue;const menu=document.createElement('details');menu.className='task-more';const summary=text('summary','⋯');summary.setAttribute('aria-label','More actions for '+row.querySelector('.task-title').textContent);menu.append(summary);const body=document.createElement('div');body.className='task-more-menu';secondary.forEach(n=>body.append(n));menu.append(body);tools.append(menu);
+    const habit=row.querySelector('.habit-actions');
+    const secondary=[...tools.children].filter(n=>!['focus-task','today-task','undo-habit','burst'].includes(n.dataset.action));
+    if(!secondary.length)continue;const menu=document.createElement('details');menu.className='task-more';const summary=text('summary','⋯');summary.setAttribute('aria-label','More actions for '+row.querySelector('.task-title').textContent);menu.append(summary);const body=document.createElement('div');body.className='task-more-menu';secondary.forEach(n=>body.append(n));if(habit)body.append(habit);menu.append(body);tools.append(menu);
     menu.addEventListener('toggle',()=>{if(menu.open)main.querySelectorAll('.task-more[open]').forEach(other=>{if(other!==menu)other.open=false;});});
   }
 }
@@ -44,20 +45,17 @@ function settings(main){
   main.querySelectorAll('.settings-grid').forEach(grid=>grid.classList.add('calm-settings-grid'));
   const phone=main.querySelector('[data-form="phone"]');
   if(phone){const provider=phone.querySelector('[name="provider"]'),toggleProvider=()=>{const ntfy=provider.value==='ntfy';for(const name of ['ntfyUrl','topic','ntfyToken','clearNtfyToken']){const control=phone.querySelector(`[name="${name}"]`);if(control)control.closest('.field,.switch-row').hidden=!ntfy;}for(const name of ['botToken','clearBotToken','chatId']){const control=phone.querySelector(`[name="${name}"]`);if(control)control.closest('.field,.switch-row').hidden=ntfy;}};provider.addEventListener('change',toggleProvider);toggleProvider();}
-  const intro=main.querySelector('.page-heading p');if(intro)intro.textContent='One thing to adjust at a time.';
+  main.prepend(main.querySelector('.page-heading'));
 }
 function sectionRun(main, title){const heading=[...main.querySelectorAll(':scope > .section-title')].find(n=>n.querySelector('h2')?.textContent===title);if(!heading)return [];const nodes=[heading];for(let n=heading.nextElementSibling;n&&!n.matches('.section-title,.integrated-section,.social-now');n=n.nextElementSibling)nodes.push(n);return nodes;}
 export function applyCalmLayout(page, main, state){
   main.dataset.page=page;taskMenus(main);
   if(['projects','life'].includes(page))for(const list of main.querySelectorAll('.project-tasks'))bounded(list,':scope > p','project-'+list.closest('.project-card').querySelector('[data-action=project-edit]').dataset.id,4);
-  if(page==='tasks'){const list=main.querySelector('.task-list');if(list)bounded(list,':scope > .task-row','tasks',6);}
-  if(page==='now'){
-    main.querySelectorAll(':scope > .support-grid').forEach(n=>n.remove());
-    const supporting=[...main.querySelectorAll(':scope > .return-cue,:scope > .momentum-panel,:scope > .daily-strip,:scope > .daily-spark,:scope > .social-now')];
-    integrateSection(main,supporting,'More for today · progress, capture & people','today-support');
-    if(!state.timer){const timer=main.querySelector('.timer-panel');if(timer){const parent=timer.parentElement;integrateSection(parent,[timer],'Choose a timer instead','today-timer');}}
+  if(page==='tasks'){
+    const list=main.querySelector('.task-list');if(list)bounded(list,':scope > .task-row','tasks',6);
+    const row=main.querySelector('.filter-row'),filters=[...row.querySelectorAll('select')],panel=document.createElement('div');panel.className='task-filter-options';panel.id='task-filter-options';filters.forEach(n=>panel.append(n));
+    const button=text('button','Filters','btn secondary compact');button.type='button';button.setAttribute('aria-controls',panel.id);const sync=()=>{panel.hidden=!taskFiltersOpen&&!filters.some(n=>n.value);button.setAttribute('aria-expanded',String(!panel.hidden));};button.addEventListener('click',()=>{taskFiltersOpen=panel.hidden;sync();});row.append(button);row.after(panel);sync();
   }
-  if(page==='focus'){const receipt=main.querySelector('.session-receipt');if(receipt)main.querySelector('.focus-layout').append(receipt);}
   if(page==='settings')settings(main);
   if(page==='capture'){
     const rows=[...main.querySelectorAll(':scope > .note-row')];if(rows.length){const list=document.createElement('section');list.className='calm-notes';list.setAttribute('aria-label','Parked thoughts');rows[0].before(list);rows.forEach(n=>list.append(n));
@@ -68,31 +66,8 @@ export function applyCalmLayout(page, main, state){
     const circles=main.querySelector('.social-circles');if(circles){circles.previousElementSibling?.remove();circles.classList.add('social-filter-bar');}
     const aside=main.querySelector('.social-aside');if(aside&&!aside.querySelector('.social-plan'))aside.remove();
   }
-  if(page==='progress'){
-    const heading=main.querySelector('.page-heading'),metrics=main.querySelector('.metric-grid'),chart=main.querySelector('.chart');
-    main.prepend(heading);heading.after(metrics,chart);
-    main.querySelectorAll(':scope > .support-grid').forEach(n=>n.remove());
-    const keepsakes=main.querySelector('.keepsake-section');
-    keepsakes?.querySelectorAll('.keepsake.locked').forEach(n=>n.remove());
-    if(keepsakes&&!keepsakes.querySelector('.keepsake'))keepsakes.remove();
-    const growth=main.querySelector('.growth-panel');
-    if(growth&&!state.sessions.some(s=>s.mode==='focus'&&s.minutes>0)&&!state.tasks.some(t=>Object.values(t.history||{}).some(list=>list.length)))growth.remove();
-    const collection=[...main.querySelectorAll(':scope > .growth-panel,:scope > .keepsake-section')];
-    if(collection.length)chart.after(integrateSection(main,collection,'Growth & keepsakes','progress-collection'));
-    const history=sectionRun(main,'Recent focus');
-    if(!history.some(n=>n.querySelector('.task-row')))history.forEach(n=>n.remove());
-    else {const section=integrateSection(main,history,'Focus history','progress-history');const list=section.querySelector('.task-list');if(list)bounded(list,':scope > .task-row','focus-history',5);}
-    const reflections=sectionRun(main,'Your reflections');
-    if(!reflections.some(n=>n.matches('.note-row')||n.querySelector('.note-row'))&&!Object.keys(state.blockFeedback||{}).length)reflections.forEach(n=>n.remove());
-    else integrateSection(main,reflections,'Reflections','progress-reflection');
-    const action=text('button','Reflect & close today','btn secondary compact');action.dataset.action='end-day';heading.append(action);
-  }
+  if(page==='progress'){const list=main.querySelector('.recent-focus .task-list');if(list)bounded(list,':scope > .task-row','focus-history',5);}
   if(page==='rewards'){
-    const random=main.querySelector(':scope > .settings-panel:not(details)');if(random)integrateSection(main,[random],'Task payouts & recent wins','reward-payouts');
-    const goals=sectionRun(main,'Gentle goals'),collection=sectionRun(main,'A growing collection'),timers=sectionRun(main,'Ready to enjoy');
-    integrateSection(main,goals,'Gentle goals','reward-goals');integrateSection(main,collection,'Collection & milestones','reward-collection');
-    if(!state.redemption&&!state.purchases.some(p=>p.kind!=='screentime'&&!p.used&&p.minutes))timers.forEach(n=>{if(!n.matches('[data-action=screentime-setup]'))n.remove();});
-    else integrateSection(main,timers,'Saved timers','reward-timers');
     const shopHeading=[...main.querySelectorAll('.section-title')].find(n=>n.querySelector('h2')?.textContent==='Your rewards');const shop=shopHeading?.nextElementSibling;if(shop?.matches('.reward-grid')){shop.classList.add('calm-shop');for(const card of shop.querySelectorAll('.reward')){const controls=[...card.querySelectorAll('[data-action="edit-reward"],[data-action="reward-delete"]')];if(controls.length){const menu=document.createElement('details');menu.className='task-more reward-more';const summary=text('summary','⋯');summary.setAttribute('aria-label','Manage '+card.querySelector('h3').textContent+' reward');menu.append(summary);const list=document.createElement('div');list.className='task-more-menu';controls.forEach(n=>list.append(n));menu.append(list);card.append(menu);}}bounded(shop,':scope > .reward','shop',4);}
   }
   if(page==='plan'){

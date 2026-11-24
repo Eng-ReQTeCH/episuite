@@ -34,12 +34,12 @@ test('board persists, detects stale edits, survives import, and permanent deleti
   try{
     const t=(await call('/api/tasks',{title:'Remove me',repeat:'daily'})).body.result;
     const graph=`task:${t.id}`;
-    assert.equal((await call('/api/life/board',{graphs:[graph,'focus'],showTotals:true,graphAccent:'#3b82f6',expectedBoardVersion:0})).status,200);
+    assert.equal((await call('/api/life/board',{graphs:[graph,'focus'],showTotals:true,showSocial:false,showReading:false,showProjects:false,graphAccent:'#3b82f6',expectedBoardVersion:0})).status,200);
     assert.equal((await call('/api/life/board',{graphs:[],expectedBoardVersion:0})).status,409);
     assert.equal((await call('/api/life/board',{graphs:['missing'],expectedBoardVersion:1})).status,400);
     const backup=(await call('/api/export')).body;await call('/api/import',backup);
     await app.close();app=await createApp({dataDir:dir,backgroundInterval:0});await listen();
-    let s=(await call('/api/state')).body;assert.deepEqual(s.life.board.graphs,[graph,'focus']);assert.equal(s.life.board.showTotals,true);assert.equal(s.life.board.graphAccent,'#3b82f6');
+    let s=(await call('/api/state')).body;assert.deepEqual(s.life.board.graphs,[graph,'focus']);assert.equal(s.life.board.showTotals,true);for(const key of ['showSocial','showReading','showProjects'])assert.equal(s.life.board[key],false);assert.equal(s.life.board.graphAccent,'#3b82f6');
     const b=(await call('/api/blocks',{name:'Linked block',date:dateKey(),taskIds:[t.id]})).body.result;
     await call('/api/tasks/'+t.id+'/complete',{});const coins=(await call('/api/state')).body.coins;
     await call('/api/timer/start',{mode:'focus',minutes:2,taskId:t.id});

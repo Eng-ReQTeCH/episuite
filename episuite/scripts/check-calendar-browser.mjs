@@ -15,8 +15,8 @@ try{
  const context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(base);await page.locator('[data-action="nav"][data-id="plan"]').first().click({timeout:10000});
  await page.locator('#plan-date').fill('2026-10-06');
- await page.locator('[data-action="new-commitment"]').first().click();
- await page.locator('#commit-name').fill('Sunday Monday course');await page.locator('#commit-date').fill('2026-10-01');await page.locator('#commit-endDate').fill('2026-10-31');await page.locator('[name="weekdays"][value="0"]').check();await page.locator('[name="weekdays"][value="1"]').check();await page.locator('#commit-location').fill('Learning room');await page.locator('#dialog [type="submit"]').click();
+ await page.locator('[data-action="new-event"]').first().click();
+ await page.locator('#commit-name').fill('Sunday Monday course');await page.locator('#commit-repeat').selectOption('weekdays');await page.locator('#commit-date').fill('2026-10-01');await page.locator('#commit-endDate').fill('2026-10-31');await page.locator('[name="weekdays"][value="0"]').check();await page.locator('[name="weekdays"][value="1"]').check();await page.locator('#commit-location').fill('Learning room');await page.locator('#dialog [type="submit"]').click();
  await page.locator('.commitment-row').filter({hasText:'Sunday Monday course'}).waitFor();
  assert.equal(await page.locator('.calendar-event').count(),8);
  await page.locator('[data-action="calendar-view"][data-id="week"]').click();assert.equal(await page.locator('.calendar-event').count(),2);

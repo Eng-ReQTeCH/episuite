@@ -48,7 +48,7 @@ try{
    assert.equal(await page.locator('details.calm-disclosure').count(),0,name+' has no bottom content drawers');
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),name+' fits '+width);
    if(name==='progress'){await page.getByRole('heading',{name:'Connections, kept',exact:true}).waitFor();const metrics=await page.locator('.metric-grid').boundingBox(),chart=await page.locator('.chart').boundingBox();assert.ok(metrics.y<chart.y);assert.equal(await page.locator('.keepsake.locked').count(),0);assert.equal(await page.getByText('Your sessions will appear here.',{exact:true}).count(),0);}
-   if(name==='plan'&&await page.locator('.timeblock').count()){const event=await page.locator('.timeline').boundingBox(),tools=await page.locator('.plan-aside').boundingBox();if(width===390)assert.ok(event.y<tools.y,'Appointments precede routines');}
+   if(name==='plan'&&await page.locator('.timeblock').count()){assert.equal(await page.locator('.plan-aside').count(),0,'Routines open through Tools');}
    await page.screenshot({path:'test-results/integrated-'+name+'-'+width+'.png',fullPage:true});
   }
  }

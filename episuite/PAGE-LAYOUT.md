@@ -40,3 +40,14 @@ LIFE OS shows people whose check-in rhythm is due today, grouped by their primar
 A configured Calendar syncs the displayed date range automatically after navigation, with a short debounce and a one-minute refresh/retry interval while visible. Sync status and failures appear in the toolbar. No calendar credentials means no automatic network attempt. One-off imports remain one-off events; actual recurring imports retain calendar recurrence metadata and appear once per remote series in the recurring commitments list. Recurring remote series are managed in the connected calendar client.
 
 Validation uses temporary workspaces and a mock CalDAV server, including navigation to an initially unloaded future range. It does not change the owner's live calendar. Independent findings and final review are in [SOCIAL-CALENDAR-JUDGE.md](SOCIAL-CALENDAR-JUDGE.md).
+
+
+## Content hierarchy correction — 2026-11-24
+
+Today now renders selected tasks first, with unfinished eligible tasks before resting or completed ones. The next action is highlighted within its row. The full timer, large intro card, coaching, novelty, reward and separate Social panels have been removed from Today. A running session has one compact global link to Focus. Focus puts task selection, countdown and primary controls first; the previous session is available on request.
+
+LIFE OS starts with a compact flame and chosen activity graphs, followed by shortcuts and a maximum three-person check-in preview with the full due count. Social, projects and current reading can be toggled in Customize. Empty project/reading modules are omitted. Add the first book through Customize; the library remains available when reading is hidden or every book is finished.
+
+Page titles now use navigation names, and repeated coaching/subtitles have been cut. Tasks has one creation route and compact filters; infrequent habit actions use each row's menu. Social has a due count and concise contact rows, with planning/task creation in the person editor. Projects has status tabs and opens task breakdowns on request. Progress orders metrics, chart and recent focus before saved reviews and a small collection summary. Rewards leads with the shop and relevant outstanding purchases; goals and collection details open on request. Calendar uses one Add event flow, defaulting to once, and opens routines/export from Tools.
+
+The layout regression now checks first-task positions, all three Today tasks before the phone dock, idle/active timer presentation, board-before-social order, contact preview bounds, activity-before-collection order, sparse header height, and deferred rendering of a remote edit after an action menu closes. The independent reassessment is recorded in [CONTENT-HIERARCHY-JUDGE.md](CONTENT-HIERARCHY-JUDGE.md).

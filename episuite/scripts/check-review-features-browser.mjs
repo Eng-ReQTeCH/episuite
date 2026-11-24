@@ -116,8 +116,8 @@ try {
   await page.locator('#f-waitingFor').fill('A library reservation');
   await save();
   await page.goto(base + '/#projects');
-  await page.locator('.project-card .project-tasks').waitFor();
-  assert.ok((await page.locator('.project-card').innerText()).includes('A library reservation'));
+  await page.locator('[data-action="project-tasks"]').click();await page.locator('#dialog .project-tasks').waitFor();
+  assert.ok((await page.locator('#dialog').innerText()).includes('A library reservation'));await close();
 
   await page.goto(base + '/#life');
   await page.evaluate(() => navigator.serviceWorker.ready);

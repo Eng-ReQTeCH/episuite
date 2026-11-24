@@ -37,14 +37,14 @@ try {
   await page.locator('#f-outcome').fill('Finish the introduction');
   await save();
   assert.ok((await page.locator('#main').innerText()).includes('Finish the introduction'));
-  await page.getByRole('button', { name: 'Start 2-minute burst →', exact: true }).click();
+  await page.getByRole('button', { name: 'Start 2 min', exact: true }).click();
   await page.getByRole('button', { name: 'Save where I am', exact: true }).click();
   await page.locator('#f-title').fill('Write the first sentence');
   await save();
   await page.getByText('Write the first sentence', { exact: true }).waitFor();
   const other = await context.newPage();
   await other.goto(base);
-  await other.getByRole('button', { name: 'Return to my session →', exact: true }).click();
+  await other.locator('.active-session-link').click();
   await other.getByText('Write the first sentence', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Take a short break', exact: true }).click();
   await waitForCondition(() => app.getState().timer?.mode === 'short');
@@ -58,6 +58,7 @@ try {
   assert.equal(await page.locator('#dialog-title b').count(), 0);
   await page.locator('#dialog [data-action="close-dialog"]').click();
   await page.locator('[data-action="task-tab"][data-id="habits"]').click();
+  await page.locator('.task-row').filter({hasText:'Read daily'}).locator('.task-more summary').click();
   await page.getByRole('button', { name: 'Log minimum version', exact: true }).click();
   await waitForCondition(() => Object.keys(app.getState().tasks.find(task => task.id === habit.id).history).length > 0);
   assert.equal(app.getState().tasks.find(item => item.id === habit.id).history[Object.keys(app.getState().tasks.find(item => item.id === habit.id).history)[0]].length, 1);

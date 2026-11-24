@@ -8,7 +8,7 @@ import {createApp} from '../server.mjs';
 import {initialState,taskInput,blockInput,addDays,dateKey} from '../public/domain.js';
 import {personInput,circleInput} from '../public/social-domain.js';
 const out=fileURLToPath(new URL('../test-results/page-layouts/',import.meta.url)),day=dateKey(),fixtures=[];
-const pages=['life','now','tasks','plan','social','focus','capture','progress','rewards','settings'];
+const pages=['life','now','tasks','plan','social','focus','capture','progress','rewards','settings','projects'];
 async function fixture(populated){
  const state=initialState();state.onboarding={status:'complete',step:7};state.settings.sound=false;
  if(populated){
@@ -17,6 +17,7 @@ async function fixture(populated){
   state.tasks=titles.map((title,i)=>{const t=taskInput({title,lane:i<3?'today':'inbox',repeat:i<6?'daily':'none',category:['Learning','Home','Health','Learning','Work'][i%5],minutes:[10,5,15,10,25][i%5],steps:i===0?[{id:'step0',title:'Open the German companion',done:false},{id:'step1',title:'Review yesterday’s words',done:false}]:[]},{id:`task-${i}`,order:i});if(i<6)for(let j=1;j<=3+i;j++)t.history[addDays(day,-j)]=[{id:`${i}-${j}`,at:Date.parse(addDays(day,-j)+'T12:00:00Z'),coins:0}];return t;});
   state.tasks[8].due=addDays(day,-1);state.tasks.push(taskInput({title:'Old task to restore'},{id:'deleted-task',deleted:true}));
   state.sessions=Array.from({length:25},(_,i)=>({id:`session-${i}`,mode:'focus',taskId:state.tasks[i%6].id,date:addDays(day,-Math.floor(i/2)),minutes:10+(i%4)*5,at:Date.now()-i*43200000,coins:2,full:true}));
+  state.projects=[{id:'layout-project',title:'Personal project',outcome:'Ship the next version',status:'active',waitingFor:'',nextTaskId:'task-4',editVersion:0}];for(const task of state.tasks.slice(4,10))task.projectId='layout-project';
   state.notes=['Idea for the German study companion','Ask about the weekend hiking route','A book I want to read next','Remember to bring the camera','Try a shorter morning routine','A thought about the personal project','Check the class timetable','Music to learn on guitar'].map((text,i)=>({id:`note-${i}`,text,created:Date.now()-i*3600000}));
   state.social.circles=['Friends','Family','Learning'].map((name,i)=>circleInput({name,color:['#7053b4','#2c856d','#bc6b40'][i]},{id:`circle-${i}`}));
   state.social.people=['Sam','Maya','Omar','Lena','Daniel','Nour','Alex'].map((name,i)=>personInput({name,circleIds:[`circle-${i%3}`],everyDays:14,lastChecked:addDays(day,-(i+1)*4),notes:['Ask about the new course.','Enjoys walks and coffee.','Working on a new project.'][i%3]},{id:`person-${i}`},state.social));
@@ -41,11 +42,32 @@ try{
   for(const id of pages){
    await page.goto(f.base+'/#'+id);await page.locator('#main h1').first().waitFor();if(id==='tasks')await page.locator('[data-action="task-tab"][data-id="all"]').click();await page.locator('#main').focus();await page.evaluate(()=>window.scrollTo(0,0));
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${f.name}/${screen}/${id} overflows`);
+   if(id==='now'){
+    assert.equal(await page.locator('.timer-panel,.focus-card,.social-now,.daily-spark,.momentum-panel').count(),0);
+    if(f.name==='populated'){const rows=await page.locator('.today-tasks>.task-row').all();assert.equal(rows.length,3);const first=await rows[0].boundingBox(),last=await rows[2].boundingBox();assert.ok(first.y<400,'First task is visible immediately');assert.ok(last.y+last.height<height-60,'All three tasks fit before the phone dock');}
+   }
+   if(id==='life'){
+    assert.equal(await page.locator('.board-contact').count()<=3,true);
+    const board=await page.locator('.board-tracking').boundingBox(),social=await page.locator('.board-social').count()?await page.locator('.board-social').boundingBox():null;if(social)assert.ok(board.y+board.height<=social.y,'Chosen board precedes social');
+    if(f.name==='populated'){assert.ok((await page.locator('.board-graph').first().boundingBox()).y<height-60,'Chosen graph in first view');}else assert.equal(await page.locator('.books-panel,.projects-panel').count(),0);
+   }
+   if(id==='progress'&&f.name==='populated'){const activity=await page.locator('.recent-focus').boundingBox(),growth=await page.locator('.growth-summary').boundingBox();assert.ok(activity.y<growth.y);assert.equal(await page.locator('.keepsake-grid').count(),0);}
+   if(screen==='phone')assert.ok((await page.locator('.sidebar').boundingBox()).height<90,'Brand header does not stretch on sparse pages');
    metrics.push({fixture:f.name,screen,page:id,...await page.locator('#main').evaluate(el=>({height:Math.round(el.scrollHeight),visibleButtons:[...el.querySelectorAll('button')].filter(b=>{const r=b.getBoundingClientRect();return r.width&&r.height&&r.top<innerHeight&&r.bottom>0;}).length}))});
    await page.screenshot({path:path.join(directory,id+'.png')});await page.screenshot({path:path.join(directory,id+'.full.png'),fullPage:true});
   }
   await page.goto(f.base+'/#plan');for(const view of ['month','day','week','agenda']){await page.locator(`[data-action="calendar-view"][data-id="${view}"]`).click();await page.locator(`[data-action="calendar-view"][data-id="${view}"][aria-pressed="true"]`).waitFor();if(f.name==='empty'){assert.equal((await(await fetch(f.base+'/api/state')).json()).blocks.length,0);await page.waitForFunction(()=>document.querySelectorAll('.calendar-event,.calendar-day-count,.timeblock').length===0);}await page.evaluate(()=>window.scrollTo(0,0));assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(directory,'calendar-'+view+'.full.png'),fullPage:true});}
  }
+ // Incoming edits must render after a user closes an open action menu.
+ await page.goto(populated.base+'/#tasks');const remoteRow=page.locator('.task-row').filter({hasText:'Practice German for ten minutes'});await remoteRow.locator('.task-more summary').click();
+ const renamed='German task renamed remotely';const response=await fetch(populated.base+'/api/tasks/task-0',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:renamed})});assert.equal(response.status,200);
+ await waitForCondition(()=>page.evaluate(title=>JSON.parse(localStorage.getItem('episuite.snapshot')).tasks.find(t=>t.id==='task-0').title===title,renamed));
+ await remoteRow.locator('.task-more summary').click();await page.getByRole('button',{name:renamed,exact:true}).waitFor();
+ // Active sessions retain the task-first Today view and have one global timer link.
+ await page.goto(populated.base+'/#now');await page.locator('.today-tasks [data-action=burst]').click();await page.locator('[data-action=pause]').waitFor();
+ await page.getByRole('button',{name:'Show workspace',exact:true}).click();await page.goto(populated.base+'/#now');
+ assert.equal(await page.locator('.active-session-link').count(),1);assert.equal(await page.locator('.timer-panel,[data-timer],.focus-card').count(),0);assert.ok((await page.locator('.today-tasks').boundingBox()).y<400);
+ await page.screenshot({path:path.join(out,'today-active-phone.png'),fullPage:true});await page.locator('.active-session-link').click();await page.locator('[data-action=reset]').click();await page.locator('[data-action=confirm-reset]').click();
  // Exercise the real controls behind progressive disclosure, not only their screenshots.
  await page.goto(populated.base+'/#settings');await page.locator('#settings-section').selectOption('rhythm');await page.locator('#f-focusMinutes').fill('30');await page.locator('[data-form="settings"] [type="submit"]').click();await waitForCondition(()=>populated.app.getState().settings.focusMinutes===30);assert.equal(populated.app.getState().settings.focusMinutes,30);
  await page.locator('#settings-section').selectOption('data');await page.locator('[data-form="category"] input').fill('Creative');await page.locator('[data-form="category"] [type="submit"]').click();await page.waitForFunction(()=>[...document.querySelectorAll('.pill')].some(n=>n.textContent.includes('Creative')));
