@@ -34,9 +34,9 @@ function taskMenus(main){
   }
 }
 function settings(main){
-  const groups=[['appearance','Appearance & accessibility'],['mobile','Mobile navigation'],['rhythm','Focus & breaks'],['feedback','Encouragement & rewards'],['phone','Phone notifications'],['data','Backups & categories'],['calendar','Calendar appearance & sync'],['tools','Background & local AI'],['help','Setup & help']];
+  const groups=[['appearance','Appearance & accessibility'],['mobile','Mobile navigation'],['life','LIFE OS'],['rhythm','Focus & breaks'],['feedback','Encouragement & rewards'],['phone','Phone notifications'],['data','Backups & categories'],['calendar','Calendar appearance & sync'],['tools','Background & local AI'],['help','Setup & help']];
   const sections=[...main.querySelectorAll('.settings-panel,.guide-settings')];
-  const map={'Calendar appearance':'calendar','Mobile navigation':'mobile','Your space':'appearance','Your rhythm':'rhythm','Make progress feel good':'feedback','Random task payouts':'feedback','Phone notifications':'phone','Keep your data safe':'data','Calendar connection':'calendar','A little help getting started':'tools','Connect your watch':'help'};
+  const map={'LIFE OS':'life','Calendar appearance':'calendar','Mobile navigation':'mobile','Your space':'appearance','Your rhythm':'rhythm','Make progress feel good':'feedback','Random task payouts':'feedback','Phone notifications':'phone','Keep your data safe':'data','Calendar connection':'calendar','A little help getting started':'tools','Connect your watch':'help'};
   sections.forEach(section=>section.dataset.settingsGroup=map[section.querySelector('h2')?.textContent]||'help');
   const label=text('label','Choose a settings section','settings-section-label'),select=document.createElement('select');select.id='settings-section';select.setAttribute('aria-label','Settings section');groups.forEach(([value,name])=>{const option=text('option',name);option.value=value;select.append(option);});select.value=settingsSection;label.append(select);main.querySelector('.page-heading').after(label);
   const prefs=main.querySelector('[data-form="settings"]');

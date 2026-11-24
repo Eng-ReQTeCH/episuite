@@ -348,3 +348,13 @@ body.dark .heat-cell.heat-1,body.dark .mini-cell.heat-1,body.dark .graph-accent-
 @media(max-width:700px){.task-more[open]>.task-more-menu{position:fixed;top:auto;right:18px;bottom:90px;max-height:min(65dvh,480px);overflow:auto;z-index:15;max-width:calc(100vw - 36px)}}
 
 @media(max-width:800px){.shell{grid-template-rows:max-content 1fr;align-content:start}.sidebar{align-self:start}}
+
+/* Pair compact LIFE OS sections; shortcuts remain the final section. */
+.board-tracking>.board-section-heading{justify-content:flex-end}
+.board-personal{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;margin-top:24px}
+.board-personal>section{min-width:0;margin:0}
+.board-personal>section:only-child{grid-column:1/-1}
+.board-personal:has(>.books-panel):has(>.board-social) .book-grid{grid-template-columns:minmax(0,1fr)}
+.board-personal .board-section-heading{flex-wrap:wrap;gap:10px}
+.board-personal .board-contact{flex-wrap:wrap}
+@media(max-width:1049px){.board-personal{grid-template-columns:minmax(0,1fr);gap:20px}}
