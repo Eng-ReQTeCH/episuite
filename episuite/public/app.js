@@ -529,7 +529,7 @@ function phoneSettings(){
 function mobileNavigationSettings(){const pages=state.settings.mobilePages||['now','tasks','plan','focus'];return `<section class="settings-panel mobile-navigation-settings"><h2>Mobile navigation</h2><p class="small">Choose the first four pages, in order. More always opens all pages.</p><form data-form="mobile-nav"><div class="form-grid">${pages.map((id,i)=>select(`Position ${i+1}`,'slot'+i,navItems.filter(n=>n[0]!=='rewards'||state.settings.gamification).map(n=>[n[0],n[2]]),id)).join('')}</div>${btn('Save mobile navigation','submit','','secondary','type="submit"')}</form></section>`;}
 function lifeSettings(){
  const board=state.life?.board;
- return `<section class="settings-panel"><h2>LIFE OS</h2><form data-form="life-settings"><input type="hidden" name="expectedBoardVersion" value="${state.life?.boardVersion||0}"><label class="switch-row"><input type="checkbox" name="showShortcuts" ${board?.showShortcuts!==false?'checked':''}><span>Show shortcuts on LIFE OS</span></label>${btn('Save LIFE OS','submit','','secondary','type="submit"')}</form></section>`;
+ return `<section class="settings-panel"><h2>LIFE OS</h2><form data-form="life-settings"><input type="hidden" name="expectedBoardVersion" value="${state.life?.boardVersion||0}"><label class="switch-row"><input type="checkbox" name="showShortcuts" ${board?.showShortcuts!==false?'checked':''}><span>Show shortcuts on LIFE OS</span></label>${btn('Save LIFE OS','submit','','secondary','type="submit"')}</form>${btn('Connect automation','automation-setup','','text compact')}</section>`;
 }
 function settingsPage() {
   const s = state.settings;

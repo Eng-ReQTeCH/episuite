@@ -1,4 +1,4 @@
-const CACHE = 'episuite-shell-v27';
+const CACHE = 'episuite-shell-v28';
 const ASSETS = ['/', '/index.html', '/styles.css', '/app.js', '/domain.js', '/reward-events.js', '/reward-shop.js', '/engagement.js', '/calendar.js', '/photo-crop.js', '/calm-layout.js', '/life-board.js', '/life.js', '/life-tools.js', '/social.js', '/social-domain.js', '/productivity.js', '/device-storage.js', '/productivity-ui.js', '/books.js', '/books-domain.js', '/projects.js', '/habit-schedule.js', '/operations.js', '/drafts.js', '/backup-ui.js', '/task-history.js', '/book-metadata.js', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('episuite-shell-') && key !== CACHE).map(key => caches.delete(key)))).then(()=>clients.claim())));
