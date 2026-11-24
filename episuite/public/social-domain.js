@@ -14,8 +14,9 @@ export function personInput(input,existing={},social=emptySocial()) {
  const circleIds=input.circleIds??existing.circleIds??[];
  if(!Array.isArray(circleIds)||circleIds.some(id=>!social.circles.some(c=>c.id===id)))throw new InputError('Choose circles that exist.');
  const everyDays=Number(input.everyDays??existing.everyDays??14);if(!Number.isInteger(everyDays)||everyDays<0||everyDays>365)throw new InputError('Choose a check-in rhythm from 0 to 365 days.');
+ if('autoTask' in input&&typeof input.autoTask!=='boolean')throw new InputError('Choose whether to create check-in tasks automatically.');
  const lastChecked=input.lastChecked??existing.lastChecked??'';if(lastChecked&&!validDate(lastChecked))throw new InputError('Choose a valid last check-in date.');
- return {...existing,id:existing.id||uid(),name,photo,circleIds:[...new Set(circleIds)],everyDays,lastChecked,notes:text(input.notes??existing.notes,3000),contact:text(input.contact??existing.contact,300),created:existing.created||Date.now()};
+ return {...existing,id:existing.id||uid(),name,photo,circleIds:[...new Set(circleIds)],everyDays,lastChecked,autoTask:input.autoTask??existing.autoTask??false,notes:text(input.notes??existing.notes,3000),contact:text(input.contact??existing.contact,300),created:existing.created||Date.now()};
 }
 export function validatePeople(state,ids=[]) {
  if(!Array.isArray(ids)||ids.some(id=>!state.social.people.some(p=>p.id===id)))throw new InputError('Choose people who exist in Social.');
@@ -62,4 +63,20 @@ export function normalizeSocial(state) {
  for(const c of s.checkins){if(!c||typeof c!=='object')throw new InputError('Backup contains an invalid check-in.');validatePeople(state,[c.personId]);if(!validDate(c.date)||typeof c.id!=='string')throw new InputError('Backup contains an invalid check-in.');c.note=text(c.note,2000);c.method=text(c.method,60);}
  for(const r of [...state.tasks,...state.blocks])validatePeople(state,r.personIds||[]);
  return state;
+}
+
+// Persist through the server mutation queue, including when a new day is opened.
+export function reconcileContactTasks(state,date) {
+ for(const task of state.tasks.filter(t=>t.autoSocialContact&&!t.deleted&&!t.completed)) {
+  const person=state.social.people.find(p=>task.personIds.includes(p.id));
+  if(!person||!person.autoTask||!contactStatus(state,person,date).due)task.deleted=true;
+  else task.title='Check in with '+person.name;
+ }
+ for(const person of state.social.people)if(person.autoTask&&contactStatus(state,person,date).due){
+  const open=state.tasks.find(t=>t.socialContact&&!t.deleted&&!t.completed&&t.personIds.includes(person.id));
+  if(!open){const task=contactTask(state,person.id,date);task.autoSocialContact=true;}
+ }
+}
+export function needsContactTasks(state,date){
+ return state.social.people.some(p=>p.autoTask&&contactStatus(state,p,date).due&&!state.tasks.some(t=>t.socialContact&&!t.deleted&&!t.completed&&t.personIds.includes(p.id)));
 }

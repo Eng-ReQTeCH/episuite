@@ -69,10 +69,11 @@ try {
   await page.locator(`[data-book="${book.id}"]`).waitFor();
   assert.match(await page.locator(`[data-book="${book.id}"] .book-position`).innerText(), /Page 40 of 322/);
   await log(book.id, 322);
-  await page.locator('.books-finished summary').click();
+  await page.locator('[data-action=book-library-finished]').click();
   assert.equal(app.getState().reading.books[0].status, 'finished');
-  assert.ok((await page.locator('.books-finished').innerText()).includes('Atomic Habits'));
+  assert.ok((await page.locator('#dialog').innerText()).includes('Atomic Habits'));
 
+  await page.locator('#dialog [data-action=close-dialog]').first().click();
   await page.getByRole('button', { name: 'Add a book', exact: true }).click();
   await page.getByRole('button', { name: 'Add manually', exact: true }).click();
   await page.locator('#f-title').fill('A book from last year');

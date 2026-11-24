@@ -48,7 +48,7 @@ try {
   await page.goto(base+'/#projects');await page.getByRole('button',{name:'New project',exact:true}).click();await page.locator('#f-title').fill('Judge project');await save();
   const project=app.getState().projects[0];await page.getByRole('button',{name:'Add task',exact:true}).click();
   assert.equal(await page.locator('#f-projectId').inputValue(),project.id);await page.locator('#f-title').fill('Project first step');await save();
-  await page.locator('.project-card summary').click();await page.getByRole('button',{name:'Make next',exact:true}).click();
+  await page.locator('.project-card .project-tasks').waitFor();await page.getByRole('button',{name:'Make next',exact:true}).click();
   await waitForCondition(()=>Boolean(app.getState().projects[0].nextTaskId));
   await search(waiting.title);await page.locator('#task-status-filter').selectOption('waiting');
   assert.ok((await page.locator('.task-list').innerText()).includes('A replacement shoe'));

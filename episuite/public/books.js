@@ -45,10 +45,7 @@ export function booksPanel(state, today) {
     ${current.length ? `<div class="book-grid">${current.slice(0, 2).map(book => bookCard(book, today)).join('')}</div>`
       : `<p class="small book-empty">${finished.length ? 'Choose your next book when you’re ready.' : 'Keep your place in a book and build a shelf of what you’ve read.'}</p>`}
     ${current.length > 2 ? button(`See all ${current.length} current books`, 'book-library-reading', '0', 'text') : ''}
-    ${finished.length ? `<details class="books-finished"><summary>Books read · ${finished.length}</summary>
-      <div class="book-grid">${finished.slice(0, 4).map(book => bookCard(book, today)).join('')}</div>
-      ${finished.length > 4 ? button('See full history', 'book-library-finished', '0', 'text') : ''}
-    </details>` : ''}
+    ${finished.length ? button(`Books read · ${finished.length}`, 'book-library-finished', '0', 'text') : ''}
     <div class="book-task-link">${button(e(linkText), 'book-task-settings', '', 'text')}</div>
   </section>`;
 }

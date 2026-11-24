@@ -34,3 +34,17 @@ test('server edits and deletions reconcile original local commitments without du
   s.blocks[0].name='Server edit';await sync();resources.delete(url);await sync();assert.equal(s.blocks.length,0);assert.equal(resources.size,0);
  }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
+
+
+test('one-off imports stay events while recurring imports carry recurrence metadata',async()=>{
+ const {server,resources}=calendarMock();await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const s=initialState();s.calendar={...s.calendar,url:'http://127.0.0.1:'+server.address().port+'/calendar/',username:'u',password:'p'};
+ try{
+  resources.set('/calendar/once.ics',{body:ics('One-off'),etag:'"once"'});
+  resources.set('/calendar/repeat.ics',{body:ics('Daily','RRULE:FREQ=DAILY;COUNT=2\r\n').replace('UID:remote','UID:daily'),etag:'"repeat"'});
+  const r=await syncCalDAV(s,['2026-10-04','2026-10-05']);
+  assert.equal(r.blocks.find(b=>b.name==='One-off').commitment,false);
+  assert.equal(r.blocks.filter(b=>b.name==='Daily').length,2);
+  assert.ok(r.blocks.filter(b=>b.name==='Daily').every(b=>b.commitment&&b.caldav.recurring));
+ }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
+});

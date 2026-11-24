@@ -1,13 +1,17 @@
 // Presentation-only grouping: existing forms and delegated actions stay intact.
-const disclosures = new Map(), listPages = new Map();
+const listPages = new Map();
 let settingsSection = 'appearance', captureQuery = '';
 const text = (tag, value, cls) => { const node=document.createElement(tag);node.textContent=value;if(cls)node.className=cls;return node; };
-function fold(parent, nodes, title, key, prepend = false) {
+function integrateSection(parent, nodes, title, key, prepend = false) {
   nodes=nodes.filter(Boolean);if(!nodes.length)return;
-  const details=document.createElement('details');details.className='calm-disclosure';details.dataset.disclosure=key;details.open=Boolean(disclosures.get(key));
-  details.append(text('summary',title));const content=document.createElement('div');content.className='calm-disclosure-content';nodes.forEach(n=>content.append(n));details.append(content);
-  if(prepend)parent.prepend(details);else parent.append(details);
-  details.addEventListener('toggle',()=>disclosures.set(key,details.open));return details;
+  const hasContent=nodes.some(n=>n.querySelector('button,input,article,.task-row,.calendar-event')||n.textContent.trim());
+  if(!hasContent)return;
+  const section=document.createElement('section');section.className='integrated-section';section.dataset.section=key;
+  if(!nodes.some(n=>n.matches('h2,h3')||n.querySelector('h2,h3')))section.append(text('h2',title.split(' · ')[0]));
+  const anchor=[...parent.children].find(n=>nodes.includes(n));
+  if(prepend)parent.prepend(section);else if(anchor)anchor.before(section);else parent.append(section);
+  const content=document.createElement('div');content.className='integrated-section-content';nodes.forEach(n=>content.append(n));section.append(content);
+  return section;
 }
 function bounded(container, selector, key, size=6, query='') {
   const items=[...container.querySelectorAll(selector)];if(!items.length)return;
@@ -42,16 +46,18 @@ function settings(main){
   if(phone){const provider=phone.querySelector('[name="provider"]'),toggleProvider=()=>{const ntfy=provider.value==='ntfy';for(const name of ['ntfyUrl','topic','ntfyToken','clearNtfyToken']){const control=phone.querySelector(`[name="${name}"]`);if(control)control.closest('.field,.switch-row').hidden=!ntfy;}for(const name of ['botToken','clearBotToken','chatId']){const control=phone.querySelector(`[name="${name}"]`);if(control)control.closest('.field,.switch-row').hidden=ntfy;}};provider.addEventListener('change',toggleProvider);toggleProvider();}
   const intro=main.querySelector('.page-heading p');if(intro)intro.textContent='One thing to adjust at a time.';
 }
-function sectionRun(main, title){const heading=[...main.querySelectorAll(':scope > .section-title')].find(n=>n.querySelector('h2')?.textContent===title);if(!heading)return [];const nodes=[heading];for(let n=heading.nextElementSibling;n&&!n.matches('.section-title,.calm-disclosure');n=n.nextElementSibling)nodes.push(n);return nodes;}
+function sectionRun(main, title){const heading=[...main.querySelectorAll(':scope > .section-title')].find(n=>n.querySelector('h2')?.textContent===title);if(!heading)return [];const nodes=[heading];for(let n=heading.nextElementSibling;n&&!n.matches('.section-title,.integrated-section,.social-now');n=n.nextElementSibling)nodes.push(n);return nodes;}
 export function applyCalmLayout(page, main, state){
   main.dataset.page=page;taskMenus(main);
+  if(['projects','life'].includes(page))for(const list of main.querySelectorAll('.project-tasks'))bounded(list,':scope > p','project-'+list.closest('.project-card').querySelector('[data-action=project-edit]').dataset.id,4);
   if(page==='tasks'){const list=main.querySelector('.task-list');if(list)bounded(list,':scope > .task-row','tasks',6);}
   if(page==='now'){
-    const supporting=[...main.querySelectorAll(':scope > .return-cue,:scope > .momentum-panel,:scope > .daily-strip,:scope > .daily-spark,:scope > .support-grid,:scope > .social-now')];
-    fold(main,supporting,'More for today · progress, capture & people','today-support');
-    if(!state.timer){const timer=main.querySelector('.timer-panel');if(timer){const parent=timer.parentElement;fold(parent,[timer],'Choose a timer instead','today-timer');}}
+    main.querySelectorAll(':scope > .support-grid').forEach(n=>n.remove());
+    const supporting=[...main.querySelectorAll(':scope > .return-cue,:scope > .momentum-panel,:scope > .daily-strip,:scope > .daily-spark,:scope > .social-now')];
+    integrateSection(main,supporting,'More for today · progress, capture & people','today-support');
+    if(!state.timer){const timer=main.querySelector('.timer-panel');if(timer){const parent=timer.parentElement;integrateSection(parent,[timer],'Choose a timer instead','today-timer');}}
   }
-  if(page==='focus')fold(main,[...main.querySelectorAll('.session-receipt,.focus-options')],'Sound & saved session','focus-extras');
+  if(page==='focus'){const receipt=main.querySelector('.session-receipt');if(receipt)main.querySelector('.focus-layout').append(receipt);}
   if(page==='settings')settings(main);
   if(page==='capture'){
     const rows=[...main.querySelectorAll(':scope > .note-row')];if(rows.length){const list=document.createElement('section');list.className='calm-notes';list.setAttribute('aria-label','Parked thoughts');rows[0].before(list);rows.forEach(n=>list.append(n));
@@ -59,28 +65,41 @@ export function applyCalmLayout(page, main, state){
   }
   if(page==='social'){
     const list=main.querySelector('.social-people');if(list)bounded(list,':scope > .person-card','people',4);
-    for(const card of main.querySelectorAll('.person-card')){const header=card.querySelector(':scope > .row'),actions=card.querySelector(':scope > .row:last-child');if(actions){const primary=actions.querySelector('[data-action="social-checkin"]'),due=header?.querySelector('.pill');if(primary)header.append(primary);const secondary=[...actions.children].filter(n=>n.dataset.action!=='social-checkin'),notes=[...card.querySelectorAll('.person-note')],circles=card.querySelector('.social-person-circles'),paragraphs=[...card.querySelectorAll(':scope > p')],nextPlan=card.querySelector('.person-next-plan');if(due&&paragraphs[0])paragraphs[0].append(text('span',' · check-in due','social-due-note'));fold(card,[circles,due,...paragraphs.slice(1),nextPlan,...notes,...secondary],'Notes & more','person-'+card.querySelector('[data-action="social-person"]').dataset.id);if(!actions.children.length)actions.remove();}}
     const circles=main.querySelector('.social-circles');if(circles){circles.previousElementSibling?.remove();circles.classList.add('social-filter-bar');}
-    const aside=main.querySelector('.social-aside');if(aside){const wrapper=aside.parentElement;fold(wrapper,[aside],'Upcoming plans','social-plans');}
+    const aside=main.querySelector('.social-aside');if(aside&&!aside.querySelector('.social-plan'))aside.remove();
   }
   if(page==='progress'){
+    const heading=main.querySelector('.page-heading'),metrics=main.querySelector('.metric-grid'),chart=main.querySelector('.chart');
+    main.prepend(heading);heading.after(metrics,chart);
+    main.querySelectorAll(':scope > .support-grid').forEach(n=>n.remove());
+    const keepsakes=main.querySelector('.keepsake-section');
+    keepsakes?.querySelectorAll('.keepsake.locked').forEach(n=>n.remove());
+    if(keepsakes&&!keepsakes.querySelector('.keepsake'))keepsakes.remove();
+    const growth=main.querySelector('.growth-panel');
+    if(growth&&!state.sessions.some(s=>s.mode==='focus'&&s.minutes>0)&&!state.tasks.some(t=>Object.values(t.history||{}).some(list=>list.length)))growth.remove();
     const collection=[...main.querySelectorAll(':scope > .growth-panel,:scope > .keepsake-section')];
-    const history=sectionRun(main,'Recent focus'),reflections=sectionRun(main,'Your reflections'),support=[...main.querySelectorAll(':scope > .support-grid,:scope > .social-now')];
-    fold(main,collection,'Growth & keepsakes','progress-collection');fold(main,history,'Focus history','progress-history');fold(main,[...reflections,...support],'Reflections & support','progress-reflection');
-    const heading=main.querySelector('.page-heading');const action=text('button','Reflect & close today','btn secondary compact');action.dataset.action='end-day';heading.append(action);
+    if(collection.length)chart.after(integrateSection(main,collection,'Growth & keepsakes','progress-collection'));
+    const history=sectionRun(main,'Recent focus');
+    if(!history.some(n=>n.querySelector('.task-row')))history.forEach(n=>n.remove());
+    else {const section=integrateSection(main,history,'Focus history','progress-history');const list=section.querySelector('.task-list');if(list)bounded(list,':scope > .task-row','focus-history',5);}
+    const reflections=sectionRun(main,'Your reflections');
+    if(!reflections.some(n=>n.matches('.note-row')||n.querySelector('.note-row'))&&!Object.keys(state.blockFeedback||{}).length)reflections.forEach(n=>n.remove());
+    else integrateSection(main,reflections,'Reflections','progress-reflection');
+    const action=text('button','Reflect & close today','btn secondary compact');action.dataset.action='end-day';heading.append(action);
   }
   if(page==='rewards'){
-    const random=main.querySelector(':scope > .settings-panel:not(details)');if(random)fold(main,[random],'Task payouts & recent wins','reward-payouts');
+    const random=main.querySelector(':scope > .settings-panel:not(details)');if(random)integrateSection(main,[random],'Task payouts & recent wins','reward-payouts');
     const goals=sectionRun(main,'Gentle goals'),collection=sectionRun(main,'A growing collection'),timers=sectionRun(main,'Ready to enjoy');
-    fold(main,goals,'Gentle goals','reward-goals');fold(main,collection,'Collection & milestones','reward-collection');
-    if(!state.redemption)fold(main,timers,'Saved timers & phone setup','reward-timers');
+    integrateSection(main,goals,'Gentle goals','reward-goals');integrateSection(main,collection,'Collection & milestones','reward-collection');
+    if(!state.redemption&&!state.purchases.some(p=>p.kind!=='screentime'&&!p.used&&p.minutes))timers.forEach(n=>{if(!n.matches('[data-action=screentime-setup]'))n.remove();});
+    else integrateSection(main,timers,'Saved timers','reward-timers');
     const shopHeading=[...main.querySelectorAll('.section-title')].find(n=>n.querySelector('h2')?.textContent==='Your rewards');const shop=shopHeading?.nextElementSibling;if(shop?.matches('.reward-grid')){shop.classList.add('calm-shop');for(const card of shop.querySelectorAll('.reward')){const controls=[...card.querySelectorAll('[data-action="edit-reward"],[data-action="reward-delete"]')];if(controls.length){const menu=document.createElement('details');menu.className='task-more reward-more';const summary=text('summary','⋯');summary.setAttribute('aria-label','Manage '+card.querySelector('h3').textContent+' reward');menu.append(summary);const list=document.createElement('div');list.className='task-more-menu';controls.forEach(n=>list.append(n));menu.append(list);card.append(menu);}}bounded(shop,':scope > .reward','shop',4);}
   }
   if(page==='plan'){
-    const toolbar=main.querySelector('.calendar-toolbar'),heading=main.querySelector('.page-heading');if(toolbar&&heading&&toolbar.compareDocumentPosition(heading)&Node.DOCUMENT_POSITION_FOLLOWING)toolbar.before(heading);if(toolbar){const tools=[...toolbar.children].filter(n=>n.matches('a')||n.dataset.action==='calendar-sync-range');if(tools.length)fold(main,tools,'Calendar export & sync','calendar-sync');}
-    const commitments=main.querySelector('.commitments-panel');if(commitments)fold(main,[commitments],'Recurring commitments & reminders','calendar-commitments');
+    const toolbar=main.querySelector('.calendar-toolbar'),heading=main.querySelector('.page-heading');if(toolbar&&heading&&toolbar.compareDocumentPosition(heading)&Node.DOCUMENT_POSITION_FOLLOWING)toolbar.before(heading);
+    const commitments=main.querySelector('.commitments-panel');if(commitments)integrateSection(main,[commitments],'Recurring commitments & reminders','calendar-commitments');
     const agenda=main.querySelector('.calendar-agenda');if(agenda){const empty=[...agenda.querySelectorAll('.calendar-cell')].filter(n=>!n.querySelector('.calendar-event'));empty.forEach(n=>n.remove());if(!agenda.querySelector('.calendar-cell'))agenda.append(text('p','No plans in this range. Pick a date or add a commitment.','empty'));bounded(agenda,':scope > .calendar-cell','agenda',7);}
-    const aside=main.querySelector('.plan-aside');if(aside){const parent=aside.parentElement;fold(parent,[aside],'Day setup & routines','day-tools');}
+    const aside=main.querySelector('.plan-aside');if(aside){const parent=aside.parentElement;integrateSection(parent,[aside],'Day setup & routines','day-tools');}
     const month=main.querySelector('.calendar-month');if(month&&matchMedia('(max-width:700px)').matches){month.classList.add('calm-month');for(const cell of month.querySelectorAll('.calendar-cell')){const events=[...cell.querySelectorAll('.calendar-event')],date=cell.querySelector('.calendar-date');events.forEach(event=>event.hidden=true);const fullDate=date.textContent;date.textContent=Number(date.dataset.id.slice(-2));date.setAttribute('aria-label',(date.getAttribute('aria-label')||fullDate)+', '+events.length+' plans');date.title=fullDate;if(events.length)cell.append(text('span',events.length+' plans','calendar-day-count'));}}
     const week=main.querySelector('.calendar-week');if(week){const scroll=week.closest('.calendar-scroll'),today=week.querySelector('.is-today')||week.querySelector(`[data-action="calendar-day"][data-id="${main.querySelector('#plan-date')?.value}"]`)?.closest('.calendar-cell');if(today)scroll.scrollLeft=Math.max(0,today.offsetLeft-week.offsetLeft-16);const hint=text('p','Swipe across the week · showing today first. Select a date for its day view.','small muted calendar-scroll-hint');scroll.before(hint);}
   }

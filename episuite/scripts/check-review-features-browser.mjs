@@ -116,7 +116,7 @@ try {
   await page.locator('#f-waitingFor').fill('A library reservation');
   await save();
   await page.goto(base + '/#projects');
-  await page.locator('.project-card summary').click();
+  await page.locator('.project-card .project-tasks').waitFor();
   assert.ok((await page.locator('.project-card').innerText()).includes('A library reservation'));
 
   await page.goto(base + '/#life');

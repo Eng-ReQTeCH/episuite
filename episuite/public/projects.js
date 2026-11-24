@@ -83,7 +83,7 @@ function card(state, project, today) {
     ${project.waitingFor ? `<p class="small">Waiting for · ${e(project.waitingFor)}</p>` : ''}
     ${button('Add task', 'project-task', project.id)}
     ${next && project.status === 'active' ? `<p>Next · ${e(next.nextAction || next.title)}</p>${button('Start next task', 'burst', next.id, 'primary')}` : ''}
-    <details><summary>Tasks</summary>${tasks.map(task => `<p><button class="task-title" data-action="edit-task" data-id="${e(task.id)}">${e(task.title)}</button>${task.workStatus === 'waiting' ? ` · waiting for ${e(task.waitingFor || 'a next step')}` : ''}${!done(task,today)?button('Make next','project-next',task.id,'text'):''}</p>`).join('') || '<p class="small">Add the first task for this outcome.</p>'}</details>
+    <section class="project-tasks"><h3>Tasks</h3>${tasks.map(task => `<p><button class="task-title" data-action="edit-task" data-id="${e(task.id)}">${e(task.title)}</button>${task.workStatus === 'waiting' ? ` · waiting for ${e(task.waitingFor || 'a next step')}` : ''}${!done(task,today)?button('Make next','project-next',task.id,'text'):''}</p>`).join('') || '<p class="small">Add the first task for this outcome.</p>'}</section>
   </article>`;
 }
 

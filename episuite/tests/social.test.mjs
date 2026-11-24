@@ -44,3 +44,40 @@ test('social HTTP flows persist, reject stale edits and malformed imports, and e
   assert.equal((await fetch(base+'/social.js')).status,200);assert.equal((await fetch(base+'/social-domain.js')).status,200);
  }finally{await app.close();}
 });
+
+
+test('automatic contact tasks follow due dates, respect opt-in, avoid duplicates and restart after undo',async()=>{
+ const {reconcileContactTasks,needsContactTasks}=await import('../public/social-domain.js');
+ const s=initialState(),date='2026-11-24';
+ const person=personInput({name:'Auto friend',autoTask:true,everyDays:7,lastChecked:'2026-11-17'},{},s.social);
+ s.social.people.push(person,personInput({name:'Manual friend'},{},s.social));
+ reconcileContactTasks(s,date);assert.equal(s.tasks.length,1);const task=s.tasks[0];
+ reconcileContactTasks(s,date);assert.equal(s.tasks.length,1);assert.equal(needsContactTasks(s,date),false);
+ toggleCompletion(s,task.id,date);syncContactCompletion(s,task);reconcileContactTasks(s,date);
+ assert.equal(s.social.checkins.length,1);assert.equal(contactStatus(s,person,date).due,false);
+ assert.equal(needsContactTasks(s,'2026-11-30'),false);assert.equal(needsContactTasks(s,'2026-12-01'),true);
+ reconcileContactTasks(s,'2026-12-01');assert.equal(s.tasks.length,2);
+ addCheckin(s,{personId:person.id,date:'2026-12-01'},'2026-12-01');reconcileContactTasks(s,'2026-12-01');assert.equal(s.tasks[1].deleted,true);
+ person.autoTask=false;reconcileContactTasks(s,'2026-12-20');assert.equal(s.tasks.length,2);
+ person.autoTask=true;person.everyDays=0;reconcileContactTasks(s,'2026-12-20');assert.equal(s.tasks.length,2);
+ assert.throws(()=>personInput({name:'Invalid',autoTask:'true'},{},s.social));
+});
+
+test('HTTP automatic contact tasks persist and regenerate at the workspace check-in rhythm',async()=>{
+ const dataDir=await mkdtemp(path.join(tmpdir(),'episuite-auto-social-'));let app=await createApp({dataDir});
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+app.server.address().port;
+ const call=async(url,data={},method='POST')=>{const r=await fetch(base+url,{method,headers:{'Content-Type':'application/json'},body:method==='GET'?undefined:JSON.stringify(data)});assert.equal(r.status,200,await r.clone().text());return r.json();};
+ try{
+  const person=(await call('/api/social/people',{name:'Sam',everyDays:7,autoTask:true})).result;
+  let task=app.getState().tasks.find(t=>t.autoSocialContact);assert.ok(task);
+  await call('/api/state',{},'GET');await call('/api/state',{},'GET');assert.equal(app.getState().tasks.length,1);
+  await call('/api/tasks/'+task.id+'/complete');assert.equal(app.getState().social.checkins.length,1);
+  await call('/api/tasks/'+task.id+'/undo');assert.equal(app.getState().social.checkins.length,0);assert.equal(app.getState().tasks.length,1);
+  await call('/api/social/people/'+person.id,{autoTask:false},'PATCH');assert.equal(app.getState().tasks[0].deleted,true);
+  await call('/api/social/people/'+person.id,{autoTask:true},'PATCH');task=app.getState().tasks.find(t=>!t.deleted);assert.ok(task);
+  await call('/api/tasks/'+task.id,{},'DELETE');assert.equal(app.getState().social.people[0].autoTask,false);assert.equal(app.getState().tasks.filter(t=>!t.deleted&&!t.completed).length,0);
+  await call('/api/tasks/'+task.id+'/restore');assert.equal(app.getState().social.people[0].autoTask,true);assert.equal(app.getState().tasks.filter(t=>!t.deleted&&!t.completed).length,1);
+  await call('/api/social/checkins',{personId:person.id});assert.equal(app.getState().tasks.filter(t=>!t.deleted&&!t.completed).length,0);
+ }finally{await app.close();}
+ const restarted=await createApp({dataDir});try{assert.equal(restarted.getState().social.people[0].autoTask,true);}finally{await restarted.close();}
+});

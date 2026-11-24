@@ -26,7 +26,7 @@ import { countToday, isDue, habitRestCount, addDays } from './public/domain.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {engagementInput,feelingInput} from './public/engagement.js';
-import {circleInput,personInput,validatePeople,addCheckin,contactTask,syncContactCompletion,normalizeSocial} from './public/social-domain.js';
+import {circleInput,personInput,validatePeople,addCheckin,contactTask,syncContactCompletion,normalizeSocial,reconcileContactTasks,needsContactTasks} from './public/social-domain.js';
 import {assignBlockColor,undoLastCompletion} from './public/domain.js';
 import { initialState, dateKey, uid, taskInput, blockInput, toggleCompletion, startTimer, pauseTimer, resumeTimer, finishTimer, remaining, schedule, metrics, legacyImport, calendarText, calendarDates, finite, validDate, done, zonedTimestamp } from './public/domain.js';
 
@@ -91,6 +91,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
   const mutate = (operation, notify = true) => {
     const job = queue.then(async () => { const before = structuredClone(state); try {
       const result = await operation();
+      reconcileContactTasks(state,dateKey(Date.now(),state.settings.timezone));
       reconcileProjectLinks(state);
       const previousSessions = new Set(before.sessions.map(session => session.id));
       for(const session of notify?state.sessions.filter(s=>!previousSessions.has(s.id)):[]){
@@ -148,6 +149,7 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
         state.life.visits[currentDay]=1;
         state.lastOpenedDay = currentDay;
       });
+      if(needsContactTasks(state,currentDay))await mutate(()=>{});
       if (state.timer?.status === 'running' && remaining(state.timer) === 0) {
         const expiredId=state.timer.id;
         await mutate(()=>{
@@ -328,8 +330,8 @@ export async function createApp({ dataDir = process.env.EPISUITE_DATA_DIR || pat
           }
           if(action==='undo'){const delta=undoLastCompletion(state,id,date);syncContactCompletion(state,t);return {delta};}
           if (action === 'complete') {const delta=toggleCompletion(state,id,date,base=>coinAward(state,base,Date.now(),rewardRandom));syncContactCompletion(state,t);const award=delta>0?(t.repeat==='none'?Object.values(t.history).flat().at(-1):t.history[date]?.at(-1)):null;return {delta,award};}
-          if (action === 'restore') { t.deleted = false; t.lane = 'inbox'; return t; }
-          if (req.method === 'DELETE') { t.deleted = true; return t; }
+          if (action === 'restore') { if(t.autoSocialContact&&state.tasks.some(other=>other.id!==t.id&&other.socialContact&&!other.deleted&&!other.completed&&other.personIds.some(id=>t.personIds.includes(id))))throw fail('An active check-in task already exists for this person.',409); t.deleted = false; t.lane = 'inbox'; if(t.autoSocialContact)for(const person of state.social.people.filter(p=>t.personIds.includes(p.id)))person.autoTask=true; return t; }
+          if (req.method === 'DELETE') { t.deleted = true; if(t.autoSocialContact)for(const person of state.social.people.filter(p=>t.personIds.includes(p.id)))person.autoTask=false; return t; }
           if (action === 'move' && data.direction) { const sorted = state.tasks.filter(x => !x.deleted && x.lane === t.lane).sort((a, b) => a.order - b.order); const i = sorted.indexOf(t); const other = sorted[i + (data.direction === 'up' ? -1 : 1)]; if (other) [t.order, other.order] = [other.order, t.order]; return t; }
           if (data.lane === 'today' && t.lane !== 'today' && state.tasks.filter(x => x.lane === 'today' && !x.deleted && !done(x, date)).length >= 3) throw fail('Your shortlist is full. Move one task to your inbox first.');
           const updated = taskInput(data,t,state.settings.timezone);validatePeople(state,updated.personIds);validateTaskProject(state,updated);Object.assign(t, updated); return t;

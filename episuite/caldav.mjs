@@ -102,6 +102,7 @@ export async function syncCalDAV(snapshot, dates, remove = false) {
             if(existing.color)edited.updatePropertyWithValue('color',existing.color);
             const etag=await write(url,r.component.toString(),r.etag);if(etag!==null){records[id]={...baseline,etag,fingerprint:fingerprint(existing)};uploaded++;}if(!recurring)break;continue;
           }
+          parsed.commitment=recurring;
           parsed.caldav={url,recurring,readOnly:recurring||occurrence.startDate.isDate||(timestamp(occurrence.endDate,snapshot.settings.timezone)-timestamp(occurrence.startDate,snapshot.settings.timezone)>480*60000)};
           if(existing)Object.assign(existing,parsed);else blocks.push(parsed);
           records[id]={etag:r.etag,fingerprint:fingerprint(parsed),url,date:parsed.date,readOnly:parsed.caldav.readOnly};imported++;
@@ -124,5 +125,5 @@ function eventBlock(event,start,end,zone,id){
   const ms=timestamp(start,zone), parts=new Intl.DateTimeFormat('en-GB',{timeZone:zone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(ms));
   const alarm=event.component.getFirstSubcomponent('valarm')?.getFirstPropertyValue('trigger');
   const color=event.component.getFirstPropertyValue('color')||'';
-  return blockInput({name:event.summary||'Calendar event',date:localDate(start,zone),start:start.isDate?'00:00':parts,duration:start.isDate?480:Math.max(5,(timestamp(end,zone)-ms)/60000),commitment:true,color:/^#[0-9a-f]{6}$/i.test(color)?color:'',location:event.component.getFirstPropertyValue('location')||'',description:event.component.getFirstPropertyValue('description')||'',reminderMinutes:alarm?.toSeconds&&alarm.toSeconds()<=0?Math.min(10080,Math.round(-alarm.toSeconds()/60)):null},{id});
+  return blockInput({name:event.summary||'Calendar event',date:localDate(start,zone),start:start.isDate?'00:00':parts,duration:start.isDate?480:Math.max(5,(timestamp(end,zone)-ms)/60000),commitment:event.isRecurring(),color:/^#[0-9a-f]{6}$/i.test(color)?color:'',location:event.component.getFirstPropertyValue('location')||'',description:event.component.getFirstPropertyValue('description')||'',reminderMinutes:alarm?.toSeconds&&alarm.toSeconds()<=0?Math.min(10080,Math.round(-alarm.toSeconds()/60)):null},{id});
 }
